@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>स्वास्थ्य सेवा प्रगति डैशबोर्ड · उदयपुर</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+:root{
+  --bg:#F1F4F0;
+  --surface:#FFFFFF;
+  --surface-2:#F7F8F5;
+  --ink:#152420;
+  --muted:#5C6B62;
+  --border:#DCE3DC;
+  --border-soft:#E9EDE7;
+  --primary:#0B5D52;
+  --primary-dark:#073F38;
+  --primary-soft:#DCEAE5;
+  --accent:#C97A2B;
+  --accent-soft:#F4E1C4;
+  --good:#1E7A4C;
+  --good-soft:#E1F0E5;
+  --bad:#AF3A45;
+  --bad-soft:#F6E1E1;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(21,36,32,.06), 0 1px 1px rgba(21,36,32,.04);
+  font-size:15px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:'Noto Sans Devanagari','Manrope',sans-serif;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+.num, .tabular{font-variant-numeric:tabular-nums;font-family:'Manrope','Noto Sans Devanagari',sans-serif;}
+button{font-family:inherit;}
+::selection{background:var(--primary-soft);}
+
+/* ---------- top bar ---------- */
+.topbar{
+  display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;
+  padding:16px 22px;background:var(--primary-dark);color:#fff;
+}
+.brand{display:flex;align-items:center;gap:14px;}
+.brand-mark{
+  width:42px;height:42px;border-radius:9px;background:var(--accent);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Manrope';font-weight:800;color:#2A1802;font-size:16px;flex:none;
+}
+.brand-text h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.2px;}
+.brand-text p{margin:2px 0 0;font-size:12.5px;color:#BFDAD3;}
+.status{display:flex;align-items:center;gap:12px;font-size:12.5px;color:#CFE6E0;}
+.status .dot{width:7px;height:7px;border-radius:50%;background:#7BD9B0;display:inline-block;margin-inline-end:6px;box-shadow:0 0 0 3px rgba(123,217,176,.25);}
+.status .dot.off{background:#E39A9A;box-shadow:0 0 0 3px rgba(227,154,154,.25);}
+.btn-ghost{
+  background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.25);
+  padding:7px 13px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;
+  transition:background .15s;
+}
+.btn-ghost:hover{background:rgba(255,255,255,.18);}
+
+/* ---------- filter bar ---------- */
+.filterbar{
+  position:sticky;top:0;z-index:30;
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  padding:12px 22px;background:var(--surface);border-bottom:1px solid var(--border);
+}
+.filter-group{position:relative;}
+.filter-btn{
+  display:flex;align-items:center;gap:7px;
+  background:var(--surface-2);border:1px solid var(--border);
+  padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);
+}
+.filter-btn:hover{border-color:var(--primary);}
+.filter-btn .badge{
+  background:var(--primary);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;
+}
+.filter-btn .chev{color:var(--muted);font-size:10px;}
+.filter-panel{
+  display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:230px;max-width:300px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(21,36,32,.14);
+  padding:10px;z-index:40;
+}
+.filter-panel.open{display:block;}
+.filter-panel-actions{display:flex;gap:8px;margin-bottom:8px;}
+.filter-panel-actions button{
+  background:var(--primary-soft);color:var(--primary-dark);border:none;border-radius:6px;
+  padding:4px 9px;font-size:11.5px;font-weight:700;cursor:pointer;
+}
+.filter-options{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;}
+.filter-options label{
+  display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;font-size:13px;cursor:pointer;
+}
+.filter-options label:hover{background:var(--surface-2);}
+.filter-options input{accent-color:var(--primary);width:15px;height:15px;}
+.filter-search{
+  width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12.5px;margin-bottom:8px;
+  font-family:inherit;
+}
+.filter-reset{
+  background:none;border:1px dashed var(--border);color:var(--muted);border-radius:8px;
+  padding:7px 12px;font-size:12.5px;cursor:pointer;font-weight:600;
+}
+.filter-reset:hover{border-color:var(--bad);color:var(--bad);}
+.filter-summary{margin-inline-start:auto;font-size:12px;color:var(--muted);}
+
+/* ---------- tabs ---------- */
+.tabs{
+  display:flex;gap:6px;padding:12px 22px 0;background:var(--bg);flex-wrap:wrap;
+}
+.tab{
+  background:transparent;border:none;padding:10px 16px;border-radius:9px 9px 0 0;
+  font-size:13.5px;font-weight:700;color:var(--muted);cursor:pointer;
+  border-bottom:3px solid transparent;
+}
+.tab.active{color:var(--primary-dark);background:var(--surface);border-bottom:3px solid var(--primary);}
+
+/* ---------- layout ---------- */
+main{padding:18px 22px 60px;}
+.page{display:none;}
+.page.active{display:block;}
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 18px;box-shadow:var(--shadow);
+}
+.card + .card{margin-top:14px;}
+.card h2{font-size:15px;margin:0 0 4px;font-weight:700;}
+.card .hint{font-size:12px;color:var(--muted);margin:0 0 12px;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.grid-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px;}
+.stat{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;
+}
+.stat .label{font-size:11.5px;color:var(--muted);font-weight:600;text-transform:none;}
+.stat .value{font-size:24px;font-weight:800;color:var(--primary-dark);font-family:'Manrope';margin-top:3px;}
+.stat .value small{font-size:13px;font-weight:600;color:var(--muted);}
+
+@media (max-width: 880px){ .grid-2{grid-template-columns:1fr;} }
+
+/* ---------- tables ---------- */
+.table-wrap{overflow-x:auto;border:1px solid var(--border-soft);border-radius:8px;}
+table{border-collapse:collapse;width:100%;font-size:13px;}
+thead th{
+  position:sticky;top:0;background:var(--surface-2);text-align:left;padding:9px 10px;
+  font-weight:700;color:var(--primary-dark);border-bottom:1px solid var(--border);white-space:nowrap;
+  cursor:pointer;user-select:none;
+}
+thead th.sticky-col, tbody td.sticky-col{position:sticky;left:0;background:var(--surface);z-index:2;}
+thead th.sticky-col{background:var(--surface-2);z-index:5;}
+thead th:hover{color:var(--primary);}
+thead th .arrow{font-size:10px;color:var(--accent);margin-inline-start:4px;}
+tbody td{padding:8px 10px;border-bottom:1px solid var(--border-soft);white-space:nowrap;}
+tbody tr:hover td{background:var(--surface-2);}
+tbody tr:nth-child(1) td.rank, tbody tr:nth-child(2) td.rank, tbody tr:nth-child(3) td.rank{font-weight:800;}
+td.rank{color:var(--muted);font-family:'Manrope';width:28px;}
+.badge-type{
+  display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:20px;
+  background:var(--primary-soft);color:var(--primary-dark);
+}
+.rank-top{color:var(--good);font-weight:800;}
+.rank-bottom{color:var(--bad);font-weight:800;}
+.bar-cell{display:flex;align-items:center;gap:8px;}
+.bar-track{flex:none;width:70px;height:6px;border-radius:4px;background:var(--border-soft);overflow:hidden;}
+.bar-fill{height:100%;background:var(--primary);}
+.bar-fill.bad{background:var(--bad);}
+
+/* ---------- controls ---------- */
+.select-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;}
+select, .text-input{
+  border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;
+  background:var(--surface);color:var(--ink);
+}
+.pill-toggle{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.pill-toggle button{
+  border:none;background:var(--surface);padding:8px 13px;font-size:12.5px;font-weight:700;cursor:pointer;color:var(--muted);
+}
+.pill-toggle button.active{background:var(--primary);color:#fff;}
+.dir-toggle{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.dir-toggle button{border:none;background:var(--surface);padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;color:var(--muted);}
+.dir-toggle button.active{background:var(--accent);color:#2A1802;}
+
+.section-title{font-size:14px;font-weight:800;color:var(--primary-dark);margin:18px 0 8px;display:flex;align-items:center;gap:8px;}
+.section-title .tag{font-size:11px;background:var(--accent-soft);color:#6B4310;padding:2px 8px;border-radius:20px;font-weight:700;}
+
+details.group-block{border:1px solid var(--border-soft);border-radius:8px;margin-bottom:10px;overflow:hidden;}
+details.group-block summary{
+  cursor:pointer;padding:10px 14px;background:var(--surface-2);font-weight:700;font-size:13.5px;color:var(--primary-dark);
+  list-style:none;display:flex;justify-content:space-between;align-items:center;
+}
+details.group-block summary::-webkit-details-marker{display:none;}
+details.group-block summary .n{font-size:11px;color:var(--muted);font-weight:600;}
+details.group-block[open] summary{border-bottom:1px solid var(--border-soft);}
+
+.empty-state{padding:40px 20px;text-align:center;color:var(--muted);}
+.empty-state .icon{font-size:30px;margin-bottom:8px;}
+.error-box{
+  background:var(--bad-soft);border:1px solid #E3B7B7;color:#7A2733;border-radius:10px;padding:14px 16px;font-size:13px;
+}
+.error-box button{margin-top:8px;background:var(--bad);color:#fff;border:none;border-radius:7px;padding:7px 12px;font-weight:700;cursor:pointer;font-size:12.5px;}
+
+.facility-picker{position:relative;max-width:420px;}
+.facility-results{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:280px;overflow-y:auto;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(21,36,32,.14);
+  z-index:20;display:none;
+}
+.facility-results.open{display:block;}
+.facility-results div{padding:8px 12px;font-size:13px;cursor:pointer;}
+.facility-results div:hover{background:var(--primary-soft);}
+.facility-results .fmeta{color:var(--muted);font-size:11.5px;}
+
+footer{padding:22px;color:var(--muted);font-size:12px;border-top:1px solid var(--border);background:var(--surface);}
+footer b{color:var(--ink);}
+footer .foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;max-width:1100px;}
+@media (max-width:800px){footer .foot-grid{grid-template-columns:1fr;}}
+
+.loading-row{display:flex;align-items:center;gap:10px;padding:30px;color:var(--muted);font-size:13px;}
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--primary);animation:spin 0.7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">RH</div>
+    <div class="brand-text">
+      <h1>स्वास्थ्य सेवा प्रगति डैशबोर्ड</h1>
+      <p>ब्लॉक व फैसिलिटी वाइज़ लाइव परफॉरमेंस मॉनिटरिंग</p>
+    </div>
+  </div>
+  <div class="status">
+    <span><span class="dot" id="statusDot"></span><span id="lastUpdated">डेटा लोड हो रहा है…</span></span>
+    <button class="btn-ghost" id="refreshBtn">⟳ रीफ्रेश करें</button>
+  </div>
+</header>
+
+<nav class="filterbar" id="filterbar">
+  <div class="filter-group">
+    <button class="filter-btn" data-filter="block">ब्लॉक <span class="badge" id="badge-block">0</span> <span class="chev">▾</span></button>
+    <div class="filter-panel" id="panel-block"></div>
+  </div>
+  <div class="filter-group">
+    <button class="filter-btn" data-filter="year">वर्ष <span class="badge" id="badge-year">0</span> <span class="chev">▾</span></button>
+    <div class="filter-panel" id="panel-year"></div>
+  </div>
+  <div class="filter-group">
+    <button class="filter-btn" data-filter="month">माह <span class="badge" id="badge-month">0</span> <span class="chev">▾</span></button>
+    <div class="filter-panel" id="panel-month"></div>
+  </div>
+  <div class="filter-group">
+    <button class="filter-btn" data-filter="ftype">फैसिलिटी टाइप <span class="badge" id="badge-ftype">0</span> <span class="chev">▾</span></button>
+    <div class="filter-panel" id="panel-ftype"></div>
+  </div>
+  <button class="filter-reset" id="resetFilters">फ़िल्टर रीसेट</button>
+  <div class="filter-summary" id="filterSummary"></div>
+</nav>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="overview">सारांश</button>
+  <button class="tab" data-tab="indicators">इंडिकेटर व्यूअर</button>
+  <button class="tab" data-tab="facility">फैसिलिटी व्यू</button>
+</nav>
+
+<main id="app">
+
+  <section class="page active" id="page-overview">
+    <div class="grid-stats" id="overviewStats"></div>
+    <div class="card">
+      <h2>Total Score के अनुसार टॉप व बॉटम परफॉर्मिंग फैसिलिटीज़</h2>
+      <p class="hint">चयनित फ़िल्टर के अनुसार — एक से अधिक माह चुनने पर सभी माह के Total Score का औसत लिया गया है।</p>
+      <div class="grid-2">
+        <div>
+          <div class="section-title">टॉप 15 फैसिलिटीज़ <span class="tag">उच्च स्कोर</span></div>
+          <div id="topFacilitiesTable" class="table-wrap"></div>
+        </div>
+        <div>
+          <div class="section-title">बॉटम 15 फैसिलिटीज़ <span class="tag">निम्न स्कोर</span></div>
+          <div id="bottomFacilitiesTable" class="table-wrap"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>ब्लॉक वाइज़ औसत स्कोर</h2>
+      <div id="blockSummaryTable" class="table-wrap"></div>
+    </div>
+  </section>
+
+  <section class="page" id="page-indicators">
+    <div class="card">
+      <div class="select-row">
+        <div>
+          <label style="font-size:12px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">इंडिकेटर ग्रुप</label>
+          <select id="groupSelect"></select>
+        </div>
+        <div class="pill-toggle" id="indicatorViewToggle">
+          <button data-mode="matrix" class="active">ग्रुप की सभी इंडिकेटर एक साथ</button>
+          <button data-mode="topbottom">एक इंडिकेटर — टॉप/बॉटम 15</button>
+        </div>
+      </div>
+      <div id="indicatorMatrixControls" class="select-row"></div>
+      <div id="indicatorTopBottomControls" class="select-row" style="display:none;"></div>
+      <div id="indicatorContent"></div>
+    </div>
+  </section>
+
+  <section class="page" id="page-facility">
+    <div class="card">
+      <h2>फैसिलिटी चुनें</h2>
+      <p class="hint">ब्लॉक या फैसिलिटी का नाम टाइप करें — चयनित फ़िल्टर की माह/वर्ष रेंज के अनुसार प्रगति दिखेगी।</p>
+      <div class="facility-picker">
+        <input type="text" class="text-input" id="facilitySearch" placeholder="फैसिलिटी / ब्लॉक खोजें…" style="width:100%;">
+        <div class="facility-results" id="facilityResults"></div>
+      </div>
+    </div>
+    <div id="facilityDetail"></div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="foot-grid">
+    <div>
+      <b>लाइव डेटा सिंक</b><br>
+      यह डैशबोर्ड हर बार खुलने पर व हर 5 मिनट में जुड़े Google Sheet के प्रकाशित (Published) CSV लिंक से सीधे नया डेटा पढ़ता है। शीट में बदलाव करते ही — Google द्वारा उसे पब्लिश करने के कुछ ही मिनटों में — डैशबोर्ड अपने आप अपडेट हो जाएगा। "⟳ रीफ्रेश करें" दबाकर तुरंत भी अपडेट कर सकते हैं।
+    </div>
+    <div>
+      <b>देखने व एडिट का अधिकार</b><br>
+      यह पेज केवल पढ़ने (read-only) के लिए है — इसमें कोई डेटा एंट्री या एडिट विकल्प नहीं है, इसलिए GitHub Pages पर सार्वजनिक रूप से होस्ट करने पर भी कोई भी इसका डेटा नहीं बदल सकता। असली डेटा में बदलाव केवल उन्हीं व्यक्तियों (एडमिन) द्वारा हो सकता है जिनके पास मूल Google Sheet की एडिट अनुमति है।
+    </div>
+    <div>
+      <b>तकनीकी</b><br>
+      स्रोत: Google Sheets (Published CSV) · यह एक स्थिर (static) HTML पेज है — Firebase Hosting या GitHub Pages दोनों पर बिना किसी बदलाव के अपलोड किया जा सकता है।
+    </div>
+  </div>
+</footer>
+
+<script>
+/* =========================================================================
+   CONFIG
+========================================================================= */
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRMrTmB8YSl9BfTGzrPQmhx3e6SBww-tf0Y1hr1Smqq_-cIxt7vcM03-lh1kMvypnrrJBCSt53u1Q-8/pub?output=csv";
+const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+
+const ID_FIELDS = { block:"Block", sector:"Sector", type:"Type of facility", year:"Year", month:"Month" };
+const TOTAL_SCORE_FIELD = "Total Score";
+
+const GROUPS = [
+  { name:"ANC Services", items:["Target ANC","ANC Rep","% ANC Rep.","ANC LL","%ANC LL/Rep.","ANC 12 Rep","% ANC 12 rep.","ANC 12 LL","% ANC 12 LL/rep","4 ANC rep","% 4 ANC rep","4 ANC LL","% 4 ANC LL/Rep","HRP","% HRP"] },
+  { name:"Delivery Services", items:["ELA Del","ID-Facility","Del LL","% ID LL/ELA","SB","SBR","Mis.Del.","% Mis.Del./ELA","5PNC","% 5 PNC","JSY","% JSY","Girl Child","RSY 1st","% RSY 1st"] },
+  { name:"Immunization Services", items:["ELA FI","FI rep.","% FI Rep/ELA","FI LL","% FI LL/Rep.","Hip 0","% hip 0 Dose","BCG","Pent 1","Pent3","MR 1","MR 2","Missing FI","P1 to P3","M1 to M2","% Missing FI","DO P1 to P3","DO M1 to M2","Total immunisation Sessioned planned","Total Session held","% Sessions held","Total vaccination done","Avg. vaccination"] },
+  { name:"Family Planning Services", items:["ID-Facility","ELA Str","Str","% Str.","PPIUCD","% PPIUCD","ELA Antra","ANTRA 1st","% Antra","Stock out N=1,Y=2","Expiry N=1 Y=2"] },
+  { name:"Clinical Services", items:["No. of Doctors","No. of CHOs","No of SHC","Population","Monthly OPD","daily OPD/doctor","Total Blood Slides Collected","% Blood slides collected","Drugs available","No of investigation available","Total IPD","TID booked under MAA","% TID booked/IPD","S -form reported by SCs =>90%","% SC reporting >90%","P form reported >90%","L Form reported days","Total ASHA","Total Incentive dispersed","Average incentive disperesed"] },
+  { name:"AAM", items:["Total CHOs initiated screening for Expanded Services.","% Total CHOs initiated screening for Expanded Services.","No of SHCs having >45 drugs","% SHC having >45","No of SHCs providing Diagnostic >7","% SHC providing Investigation >7","No of CHOs using CHO soft","% CHOs using CHO Soft"] },
+  { name:"NCD", items:["Total ELA (population >30+yrs)","people screened HT","% people screened HT","HT - receiving treatment","% receiving treatment","People screened diabetes","% People screened diabetes","Diabetes receiving treatment","%Diabetes receiving treatment"] },
+  { name:"TB", items:["Estimated TB patient","Total TB Patients Notified","% TB Patients Notified","Total TB Cases Successfully Treated","% TB Cases Successfully Treated","Total TB patients assessed for differentiated care","% TB patients assessed for differentiated care"] }
+];
+
+/* =========================================================================
+   STATE
+========================================================================= */
+const state = {
+  rows: [],
+  columns: [],          // original header strings
+  colIndexByNorm: {},    // normalized -> original header
+  idCols: {},             // resolved original header names for id fields
+  groupCols: [],          // GROUPS resolved to actual columns [{name, cols:[{label,col}]}]
+  values: { block:[], year:[], month:[], ftype:[] },
+  filters: { block:new Set(), year:new Set(), month:new Set(), ftype:new Set() },
+  currentTab: "overview",
+  indicatorMode: "matrix",
+  loaded: false,
+  loading: false,
+  error: null,
+};
+
+/* =========================================================================
+   UTILITIES
+========================================================================= */
+function norm(s){
+  return (s===undefined||s===null) ? "" : String(s).replace(/\r/g," ").replace(/\n/g," ").replace(/\s+/g," ").trim().toLowerCase();
+}
+function normLoose(s){ return norm(s).replace(/[^a-z0-9%]/g,""); }
+
+function parseNum(v){
+  if(v===undefined||v===null||v==="") return null;
+  const n = parseFloat(String(v).replace(/,/g,"").replace("%","").trim());
+  return isNaN(n) ? null : n;
+}
+function isPercentCol(colName){ return colName.indexOf("%") !== -1; }
+
+function fmtNum(n){
+  if(n===null||n===undefined||isNaN(n)) return "—";
+  const rounded = Math.round(n*100)/100;
+  return rounded.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+function fmtVal(colName, n){
+  if(n===null||n===undefined||isNaN(n)) return "—";
+  return isPercentCol(colName) ? (fmtNum(n)+"%") : fmtNum(n);
+}
+function monthSortKey(m){
+  const match = /^(\d+)\./.exec(m||"");
+  return match ? parseInt(match[1],10) : 999;
+}
+function monthLabel(m){ return (m||"").replace(/^\d+\.\s*/,""); }
+
+function esc(s){
+  return String(s===undefined||s===null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function facilityKey(r){ return state.idCols.block + "||" + r[state.idCols.block] + "||" + r[state.idCols.sector] + "||" + r[state.idCols.type]; }
+
+/* =========================================================================
+   DATA LOADING
+========================================================================= */
+async function loadData(isAuto){
+  state.loading = true;
+  state.error = null;
+  if(!isAuto) renderStatus("loading");
+  try{
+    const bust = CSV_URL + (CSV_URL.indexOf("?")>-1 ? "&" : "?") + "_ts=" + Date.now();
+    const resp = await fetch(bust, { cache:"no-store" });
+    if(!resp.ok) throw new Error("HTTP " + resp.status);
+    const text = await resp.text();
+    const parsed = Papa.parse(text, { header:true, skipEmptyLines:true, dynamicTyping:false });
+    if(!parsed.data || !parsed.data.length) throw new Error("कोई डेटा नहीं मिला");
+
+    state.rows = parsed.data;
+    state.columns = parsed.meta.fields || Object.keys(parsed.data[0]);
+    buildColumnIndex();
+    resolveIdCols();
+    resolveGroupCols();
+    computeFilterValues();
+    // default: select everything on first load; keep existing selection on refresh if still valid
+    seedFilters();
+
+    state.loaded = true;
+    state.loading = false;
+    renderStatus("ok");
+    renderFilterUI();
+    renderAll();
+  }catch(err){
+    state.loading = false;
+    state.error = err.message || String(err);
+    renderStatus("error");
+    if(!state.loaded) renderFatalError();
+  }
+}
+
+function buildColumnIndex(){
+  state.colIndexByNorm = {};
+  state.columns.forEach(c => { state.colIndexByNorm[norm(c)] = c; });
+}
+function matchColumn(name){
+  const n = norm(name);
+  if(state.colIndexByNorm[n]) return state.colIndexByNorm[n];
+  const nl = normLoose(name);
+  for(const key in state.colIndexByNorm){
+    if(key.replace(/[^a-z0-9%]/g,"") === nl) return state.colIndexByNorm[key];
+  }
+  return null;
+}
+function resolveIdCols(){
+  state.idCols = {
+    block: matchColumn(ID_FIELDS.block) || ID_FIELDS.block,
+    sector: matchColumn(ID_FIELDS.sector) || ID_FIELDS.sector,
+    type: matchColumn(ID_FIELDS.type) || ID_FIELDS.type,
+    year: matchColumn(ID_FIELDS.year) || ID_FIELDS.year,
+    month: matchColumn(ID_FIELDS.month) || ID_FIELDS.month,
+    score: matchColumn(TOTAL_SCORE_FIELD) || TOTAL_SCORE_FIELD,
+  };
+}
+function resolveGroupCols(){
+  state.groupCols = GROUPS.map(g => ({
+    name: g.name,
+    cols: g.items.map(item => {
+      const col = matchColumn(item);
+      return col ? { label:item, col:col } : null;
+    }).filter(Boolean)
+  })).filter(g => g.cols.length);
+}
+function computeFilterValues(){
+  const b=new Set(), y=new Set(), m=new Set(), f=new Set();
+  state.rows.forEach(r=>{
+    if(r[state.idCols.block]) b.add(r[state.idCols.block]);
+    if(r[state.idCols.year]) y.add(r[state.idCols.year]);
+    if(r[state.idCols.month]) m.add(r[state.idCols.month]);
+    if(r[state.idCols.type]) f.add(r[state.idCols.type]);
+  });
+  state.values.block = Array.from(b).sort();
+  state.values.year = Array.from(y).sort();
+  state.values.month = Array.from(m).sort((a,b)=>monthSortKey(a)-monthSortKey(b));
+  state.values.ftype = Array.from(f).sort();
+}
+function seedFilters(){
+  ["block","year","month","ftype"].forEach(k=>{
+    const existing = state.filters[k];
+    const universe = state.values[k];
+    if(existing.size===0){
+      universe.forEach(v=>existing.add(v));
+    }else{
+      // drop selections no longer present
+      Array.from(existing).forEach(v=>{ if(universe.indexOf(v)===-1) existing.delete(v); });
+    }
+  });
+}
+
+/* =========================================================================
+   STATUS / ERROR UI
+========================================================================= */
+function renderStatus(kind){
+  const dot = document.getElementById("statusDot");
+  const label = document.getElementById("lastUpdated");
+  if(kind==="loading"){
+    dot.classList.remove("off");
+    label.textContent = "डेटा लोड हो रहा है…";
+  }else if(kind==="ok"){
+    dot.classList.remove("off");
+    const t = new Date();
+    label.textContent = "अपडेटेड: " + t.toLocaleTimeString("hi-IN",{hour:"2-digit",minute:"2-digit"}) + " · " + state.rows.length + " रिकॉर्ड";
+  }else if(kind==="error"){
+    dot.classList.add("off");
+    label.textContent = "डेटा लाने में समस्या — पुराना डेटा दिखाया जा रहा है";
+  }
+}
+function renderFatalError(){
+  document.getElementById("app").innerHTML =
+    '<div class="card"><div class="error-box"><b>Google Sheet से डेटा लोड नहीं हो सका।</b><br>' +
+    esc(state.error) + '<br><br>यह तब हो सकता है जब यह पेज सीधे फ़ाइल के रूप में खोला गया हो (file://) — कृपया इसे किसी वेब सर्वर (जैसे GitHub Pages, Firebase Hosting, या Live Server) से खोलें, और सुनिश्चित करें कि Google Sheet "वेब पर प्रकाशित करें" (Publish to web → CSV) के रूप में सेट है।' +
+    '<button onclick="loadData(false)">पुनः प्रयास करें</button></div></div>';
+}
+
+/* =========================================================================
+   FILTER UI
+========================================================================= */
+const FILTER_LABELS = { block:"ब्लॉक", year:"वर्ष", month:"माह", ftype:"फैसिलिटी टाइप" };
+
+function renderFilterUI(){
+  ["block","year","month","ftype"].forEach(renderFilterPanel);
+  updateFilterBadges();
+  updateFilterSummary();
+}
+function renderFilterPanel(key){
+  const panel = document.getElementById("panel-" + key);
+  const universe = state.values[key];
+  const showSearch = universe.length > 8;
+  let html = "";
+  if(showSearch) html += '<input class="filter-search" placeholder="खोजें…" oninput="filterPanelSearch(\''+key+'\',this.value)">';
+  html += '<div class="filter-panel-actions"><button onclick="setAllFilter(\''+key+'\',true)">सभी</button><button onclick="setAllFilter(\''+key+'\',false)">कोई नहीं</button></div>';
+  html += '<div class="filter-options" id="opts-'+key+'">';
+  universe.forEach(v=>{
+    const checked = state.filters[key].has(v) ? "checked" : "";
+    const displayVal = key==="month" ? monthLabel(v) : v;
+    html += '<label data-search="'+esc(norm(v))+'"><input type="checkbox" '+checked+' onchange="toggleFilterValue(\''+key+'\',\''+esc(v).replace(/'/g,"&#39;")+'\',this.checked)">'+esc(displayVal)+'</label>';
+  });
+  html += "</div>";
+  panel.innerHTML = html;
+}
+function filterPanelSearch(key, q){
+  const nq = norm(q);
+  document.querySelectorAll("#opts-"+key+" label").forEach(l=>{
+    l.style.display = l.getAttribute("data-search").indexOf(nq) > -1 ? "flex" : "none";
+  });
+}
+function toggleFilterValue(key, val, checked){
+  if(checked) state.filters[key].add(val); else state.filters[key].delete(val);
+  updateFilterBadges(); updateFilterSummary(); renderAll();
+}
+function setAllFilter(key, all){
+  state.filters[key] = new Set(all ? state.values[key] : []);
+  renderFilterPanel(key);
+  updateFilterBadges(); updateFilterSummary(); renderAll();
+}
+function updateFilterBadges(){
+  ["block","year","month","ftype"].forEach(k=>{
+    document.getElementById("badge-"+k).textContent = state.filters[k].size + "/" + state.values[k].length;
+  });
+}
+function updateFilterSummary(){
+  document.getElementById("filterSummary").textContent =
+    getFilteredRows().length + " रिकॉर्ड चयनित";
+}
+
+// open/close panels
+document.addEventListener("click", (e)=>{
+  const isFilterBtn = e.target.closest(".filter-btn");
+  document.querySelectorAll(".filter-panel").forEach(p=>{
+    const owner = p.previousElementSibling;
+    if(isFilterBtn && owner===isFilterBtn){
+      p.classList.toggle("open");
+    }else if(!p.contains(e.target)){
+      p.classList.remove("open");
+    }
+  });
+});
+document.getElementById("resetFilters").addEventListener("click", ()=>{
+  ["block","year","month","ftype"].forEach(k=>{
+    state.filters[k] = new Set(state.values[k]);
+    renderFilterPanel(k);
+  });
+  updateFilterBadges(); updateFilterSummary(); renderAll();
+});
+document.getElementById("refreshBtn").addEventListener("click", ()=>loadData(false));
+
+/* =========================================================================
+   TABS
+========================================================================= */
+document.querySelectorAll(".tab").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("page-"+btn.dataset.tab).classList.add("active");
+    state.currentTab = btn.dataset.tab;
+    renderAll();
+  });
+});
+
+/* =========================================================================
+   FILTERED DATA
+========================================================================= */
+function getFilteredRows(){
+  if(!state.loaded) return [];
+  const f = state.filters, ic = state.idCols;
+  return state.rows.filter(r =>
+    f.block.has(r[ic.block]) && f.year.has(r[ic.year]) && f.month.has(r[ic.month]) && f.ftype.has(r[ic.type])
+  );
+}
+
+/* Aggregate a set of rows by facility for a list of column names.
+   Percent columns -> mean across matched rows; other numeric columns -> sum. */
+function aggregateByFacility(rows, colNames){
+  const map = new Map();
+  rows.forEach(r=>{
+    const key = facilityKey(r);
+    if(!map.has(key)){
+      map.set(key, {
+        block: r[state.idCols.block], facility: r[state.idCols.sector], type: r[state.idCols.type],
+        sums:{}, counts:{}, monthCount:0
+      });
+    }
+    const e = map.get(key);
+    e.monthCount++;
+    colNames.forEach(c=>{
+      const v = parseNum(r[c]);
+      if(v===null) return;
+      e.sums[c] = (e.sums[c]||0) + v;
+      e.counts[c] = (e.counts[c]||0) + 1;
+    });
+  });
+  return Array.from(map.values()).map(e=>{
+    const vals = {};
+    colNames.forEach(c=>{
+      if(e.counts[c]) vals[c] = isPercentCol(c) ? (e.sums[c]/e.counts[c]) : e.sums[c];
+      else vals[c] = null;
+    });
+    return { block:e.block, facility:e.facility, type:e.type, monthCount:e.monthCount, vals };
+  });
+}
+
+/* =========================================================================
+   RENDER DISPATCH
+========================================================================= */
+function renderAll(){
+  if(!state.loaded) return;
+  updateFilterSummary();
+  if(state.currentTab==="overview") renderOverview();
+  else if(state.currentTab==="indicators") renderIndicatorsPage();
+  else if(state.currentTab==="facility") renderFacilityPage();
+}
+
+/* =========================================================================
+   OVERVIEW PAGE
+========================================================================= */
+function renderOverview(){
+  const rows = getFilteredRows();
+  const scoreCol = state.idCols.score;
+  const agg = aggregateByFacility(rows, [scoreCol]).filter(a => a.vals[scoreCol] !== null);
+
+  // stats
+  const nBlocks = new Set(rows.map(r=>r[state.idCols.block])).size;
+  const nFac = agg.length;
+  const avgScore = agg.length ? (agg.reduce((s,a)=>s+a.vals[scoreCol],0)/agg.length) : null;
+  document.getElementById("overviewStats").innerHTML = [
+    stat("चयनित रिकॉर्ड", rows.length),
+    stat("फैसिलिटीज़", nFac),
+    stat("ब्लॉक", nBlocks),
+    stat("औसत Total Score", avgScore!==null ? fmtNum(avgScore) : "—"),
+  ].join("");
+
+  const sorted = agg.slice().sort((a,b)=>b.vals[scoreCol]-a.vals[scoreCol]);
+  const top = sorted.slice(0,15);
+  const bottom = sorted.slice().sort((a,b)=>a.vals[scoreCol]-b.vals[scoreCol]).slice(0,15);
+  const maxScore = sorted.length ? sorted[0].vals[scoreCol] : 1;
+
+  document.getElementById("topFacilitiesTable").innerHTML = facilityScoreTable(top, scoreCol, maxScore, "top");
+  document.getElementById("bottomFacilitiesTable").innerHTML = facilityScoreTable(bottom, scoreCol, maxScore, "bottom");
+
+  // block summary
+  const blockMap = new Map();
+  agg.forEach(a=>{
+    if(!blockMap.has(a.block)) blockMap.set(a.block, {sum:0,n:0,facilities:0});
+    const b = blockMap.get(a.block);
+    b.sum += a.vals[scoreCol]; b.n++; b.facilities++;
+  });
+  const blockRows = Array.from(blockMap.entries()).map(([block,d])=>({block, avg:d.sum/d.n, facilities:d.facilities}))
+    .sort((a,b)=>b.avg-a.avg);
+  let bhtml = '<table><thead><tr><th>ब्लॉक</th><th class="num">फैसिलिटीज़</th><th class="num">औसत Total Score</th></tr></thead><tbody>';
+  blockRows.forEach(b=>{
+    bhtml += '<tr><td>'+esc(b.block)+'</td><td class="num">'+b.facilities+'</td><td class="num">'+fmtNum(b.avg)+'</td></tr>';
+  });
+  bhtml += "</tbody></table>";
+  document.getElementById("blockSummaryTable").innerHTML = blockRows.length ? bhtml : emptyState();
+}
+function stat(label, value){
+  return '<div class="stat"><div class="label">'+esc(label)+'</div><div class="value">'+esc(value)+'</div></div>';
+}
+function facilityScoreTable(list, scoreCol, maxScore, kind){
+  if(!list.length) return emptyState();
+  let html = '<table><thead><tr><th>#</th><th class="sticky-col">फैसिलिटी</th><th>ब्लॉक</th><th>टाइप</th><th class="num">Total Score</th></tr></thead><tbody>';
+  list.forEach((a,i)=>{
+    const pct = maxScore ? Math.max(4, (a.vals[scoreCol]/maxScore)*100) : 0;
+    html += '<tr><td class="rank '+(kind==="top"?"rank-top":"rank-bottom")+'">'+(i+1)+'</td>' +
+      '<td class="sticky-col">'+esc(a.facility)+'</td>' +
+      '<td>'+esc(a.block)+'</td>' +
+      '<td><span class="badge-type">'+esc(a.type)+'</span></td>' +
+      '<td class="num"><div class="bar-cell"><div class="bar-track"><div class="bar-fill '+(kind==="bottom"?"bad":"")+'" style="width:'+pct+'%"></div></div><span class="tabular">'+fmtNum(a.vals[scoreCol])+'</span></div></td></tr>';
+  });
+  html += "</tbody></table>";
+  return html;
+}
+function emptyState(){
+  return '<div class="empty-state"><div class="icon">∅</div>चयनित फ़िल्टर के लिए कोई डेटा नहीं मिला</div>';
+}
+
+/* =========================================================================
+   INDICATOR EXPLORER PAGE
+========================================================================= */
+let indicatorState = { group: null, indicator: null, direction: "desc" };
+
+function initIndicatorControls(){
+  const sel = document.getElementById("groupSelect");
+  sel.innerHTML = state.groupCols.map(g=>'<option value="'+esc(g.name)+'">'+esc(g.name)+'</option>').join("");
+  if(!indicatorState.group) indicatorState.group = state.groupCols[0] ? state.groupCols[0].name : null;
+  sel.value = indicatorState.group;
+  sel.onchange = ()=>{ indicatorState.group = sel.value; indicatorState.indicator = null; renderIndicatorsPage(); };
+
+  document.querySelectorAll("#indicatorViewToggle button").forEach(b=>{
+    b.onclick = ()=>{
+      document.querySelectorAll("#indicatorViewToggle button").forEach(x=>x.classList.remove("active"));
+      b.classList.add("active");
+      state.indicatorMode = b.dataset.mode;
+      document.getElementById("indicatorMatrixControls").style.display = state.indicatorMode==="matrix" ? "flex" : "none";
+      document.getElementById("indicatorTopBottomControls").style.display = state.indicatorMode==="topbottom" ? "flex" : "none";
+      renderIndicatorsPage();
+    };
+  });
+}
+
+function currentGroup(){
+  return state.groupCols.find(g=>g.name===indicatorState.group) || state.groupCols[0];
+}
+
+function renderIndicatorsPage(){
+  if(!state.groupCols.length){
+    document.getElementById("indicatorContent").innerHTML = '<div class="error-box">इंडिकेटर कॉलम शीट में नहीं मिले — कृपया कॉलम नाम जांचें।</div>';
+    return;
+  }
+  initIndicatorControls();
+  const group = currentGroup();
+  const rows = getFilteredRows();
+
+  if(state.indicatorMode==="matrix"){
+    document.getElementById("indicatorTopBottomControls").innerHTML = "";
+    renderGroupMatrix(group, rows);
+  }else{
+    renderTopBottomControls(group);
+    renderTopBottom(group, rows);
+  }
+}
+
+function renderGroupMatrix(group, rows){
+  const cols = group.cols;
+  const agg = aggregateByFacility(rows, cols.map(c=>c.col));
+  document.getElementById("indicatorMatrixControls").innerHTML =
+    '<span class="hint" style="margin:0;">'+esc(group.name)+' ग्रुप की सभी '+cols.length+' इंडिकेटर — कॉलम हेडर पर क्लिक कर सॉर्ट करें। ('+agg.length+' फैसिलिटीज़)</span>';
+
+  if(!agg.length){ document.getElementById("indicatorContent").innerHTML = emptyState(); return; }
+
+  window.__matrixData = { agg, cols };
+  window.__matrixSort = window.__matrixSort || { key:"facility", dir:"asc" };
+  renderMatrixTable();
+}
+function renderMatrixTable(){
+  const { agg, cols } = window.__matrixData;
+  const sortKey = window.__matrixSort.key, sortDir = window.__matrixSort.dir;
+  const sorted = agg.slice().sort((a,b)=>{
+    let av, bv;
+    if(sortKey==="facility"){ av=a.facility; bv=b.facility; }
+    else if(sortKey==="block"){ av=a.block; bv=b.block; }
+    else { av = a.vals[sortKey]; bv = b.vals[sortKey]; av = av===null?-Infinity:av; bv = bv===null?-Infinity:bv; }
+    if(av<bv) return sortDir==="asc"?-1:1;
+    if(av>bv) return sortDir==="asc"?1:-1;
+    return 0;
+  });
+  let html = '<div class="table-wrap"><table><thead><tr>';
+  html += '<th class="sticky-col" onclick="sortMatrix(\'facility\')">फैसिलिटी'+sortArrow("facility")+'</th>';
+  html += '<th onclick="sortMatrix(\'block\')">ब्लॉक'+sortArrow("block")+'</th>';
+  cols.forEach(c=>{ html += '<th onclick="sortMatrix(\''+esc(c.col).replace(/'/g,"&#39;")+'\')" title="'+esc(c.label)+'">'+esc(c.label)+sortArrow(c.col)+'</th>'; });
+  html += '</tr></thead><tbody>';
+  sorted.forEach(a=>{
+    html += '<tr><td class="sticky-col">'+esc(a.facility)+'</td><td>'+esc(a.block)+'</td>';
+    cols.forEach(c=>{ html += '<td class="num tabular">'+fmtVal(c.col, a.vals[c.col])+'</td>'; });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  document.getElementById("indicatorContent").innerHTML = html;
+}
+function sortArrow(key){
+  if(window.__matrixSort.key!==key) return "";
+  return '<span class="arrow">'+(window.__matrixSort.dir==="asc"?"▲":"▼")+'</span>';
+}
+function sortMatrix(key){
+  if(window.__matrixSort.key===key) window.__matrixSort.dir = window.__matrixSort.dir==="asc"?"desc":"asc";
+  else window.__matrixSort = { key, dir: key==="facility"||key==="block" ? "asc" : "desc" };
+  renderMatrixTable();
+}
+
+function renderTopBottomControls(group){
+  if(!indicatorState.indicator || !group.cols.find(c=>c.col===indicatorState.indicator)){
+    indicatorState.indicator = group.cols[0].col;
+  }
+  let html = '<div>';
+  html += '<label style="font-size:12px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">इंडिकेटर चुनें</label>';
+  html += '<select id="indicatorSelect">';
+  group.cols.forEach(c=>{ html += '<option value="'+esc(c.col).replace(/'/g,"&#39;")+'" '+(c.col===indicatorState.indicator?"selected":"")+'>'+esc(c.label)+'</option>'; });
+  html += '</select></div>';
+  html += '<div><label style="font-size:12px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">बेहतर प्रदर्शन किस दिशा में है</label>';
+  html += '<div class="dir-toggle"><button data-dir="desc" class="'+(indicatorState.direction==="desc"?"active":"")+'">उच्च मान बेहतर</button><button data-dir="asc" class="'+(indicatorState.direction==="asc"?"active":"")+'">निम्न मान बेहतर</button></div></div>';
+  document.getElementById("indicatorTopBottomControls").innerHTML = html;
+  document.getElementById("indicatorSelect").onchange = (e)=>{ indicatorState.indicator = e.target.value; renderTopBottom(currentGroup(), getFilteredRows()); };
+  document.querySelectorAll("#indicatorTopBottomControls .dir-toggle button").forEach(b=>{
+    b.onclick = ()=>{ indicatorState.direction = b.dataset.dir; renderTopBottom(currentGroup(), getFilteredRows()); };
+  });
+}
+function renderTopBottom(group, rows){
+  const col = indicatorState.indicator;
+  const label = (group.cols.find(c=>c.col===col)||{}).label || col;
+  const agg = aggregateByFacility(rows, [col]).filter(a=>a.vals[col]!==null);
+  if(!agg.length){ document.getElementById("indicatorContent").innerHTML = emptyState(); return; }
+  const better = indicatorState.direction; // desc = higher better, asc = lower better
+  const sortedDesc = agg.slice().sort((a,b)=>b.vals[col]-a.vals[col]);
+  const top = better==="desc" ? sortedDesc.slice(0,15) : sortedDesc.slice().reverse().slice(0,15);
+  const bottom = better==="desc" ? sortedDesc.slice().reverse().slice(0,15) : sortedDesc.slice(0,15);
+  const maxV = Math.max(...agg.map(a=>Math.abs(a.vals[col])), 1);
+
+  let html = '<div class="section-title">'+esc(label)+' <span class="tag">'+agg.length+' फैसिलिटीज़</span></div>';
+  html += '<div class="grid-2">';
+  html += '<div><div class="section-title" style="margin-top:0;">टॉप 15</div>' + indicatorMiniTable(top, col, maxV, "top") + '</div>';
+  html += '<div><div class="section-title" style="margin-top:0;">बॉटम 15</div>' + indicatorMiniTable(bottom, col, maxV, "bottom") + '</div>';
+  html += '</div>';
+  document.getElementById("indicatorContent").innerHTML = html;
+}
+function indicatorMiniTable(list, col, maxV, kind){
+  if(!list.length) return emptyState();
+  let html = '<div class="table-wrap"><table><thead><tr><th>#</th><th class="sticky-col">फैसिलिटी</th><th>ब्लॉक</th><th class="num">मान</th></tr></thead><tbody>';
+  list.forEach((a,i)=>{
+    const pct = maxV ? Math.max(4, (Math.abs(a.vals[col])/maxV)*100) : 0;
+    html += '<tr><td class="rank '+(kind==="top"?"rank-top":"rank-bottom")+'">'+(i+1)+'</td>' +
+      '<td class="sticky-col">'+esc(a.facility)+'</td><td>'+esc(a.block)+'</td>' +
+      '<td class="num"><div class="bar-cell"><div class="bar-track"><div class="bar-fill '+(kind==="bottom"?"bad":"")+'" style="width:'+pct+'%"></div></div><span class="tabular">'+fmtVal(col,a.vals[col])+'</span></div></td></tr>';
+  });
+  html += "</tbody></table></div>";
+  return html;
+}
+
+/* =========================================================================
+   FACILITY EXPLORER PAGE
+========================================================================= */
+let selectedFacility = null;
+
+const facSearchInput = document.getElementById("facilitySearch");
+const facResultsBox = document.getElementById("facilityResults");
+facSearchInput.addEventListener("input", ()=>{
+  const q = norm(facSearchInput.value);
+  if(!q){ facResultsBox.classList.remove("open"); return; }
+  const rows = getFilteredRows();
+  const seen = new Set();
+  const matches = [];
+  rows.forEach(r=>{
+    const key = facilityKey(r);
+    if(seen.has(key)) return;
+    const facName = r[state.idCols.sector], block = r[state.idCols.block], type = r[state.idCols.type];
+    if(norm(facName).indexOf(q)>-1 || norm(block).indexOf(q)>-1){
+      seen.add(key);
+      matches.push({key, facName, block, type});
+    }
+  });
+  matches.sort((a,b)=>a.facName.localeCompare(b.facName));
+  if(!matches.length){ facResultsBox.innerHTML = '<div style="color:var(--muted);">कोई परिणाम नहीं</div>'; }
+  else{
+    facResultsBox.innerHTML = matches.slice(0,40).map(m=>
+      '<div onclick="pickFacility(\''+esc(m.key).replace(/'/g,"&#39;")+'\')">'+esc(m.facName)+' <span class="fmeta">— '+esc(m.block)+' · '+esc(m.type)+'</span></div>'
+    ).join("");
+  }
+  facResultsBox.classList.add("open");
+});
+document.addEventListener("click", (e)=>{
+  if(!facResultsBox.contains(e.target) && e.target!==facSearchInput) facResultsBox.classList.remove("open");
+});
+function pickFacility(key){
+  selectedFacility = key;
+  facResultsBox.classList.remove("open");
+  const rows = getFilteredRows().filter(r=>facilityKey(r)===key);
+  facSearchInput.value = rows.length ? rows[0][state.idCols.sector] + " — " + rows[0][state.idCols.block] : "";
+  renderFacilityPage();
+}
+
+function renderFacilityPage(){
+  const container = document.getElementById("facilityDetail");
+  if(!selectedFacility){
+    container.innerHTML = '<div class="card"><div class="empty-state"><div class="icon">🏥</div>ऊपर सर्च बॉक्स में फैसिलिटी का नाम टाइप कर चुनें</div></div>';
+    return;
+  }
+  const rows = getFilteredRows().filter(r=>facilityKey(r)===selectedFacility)
+    .sort((a,b)=>monthSortKey(a[state.idCols.month])-monthSortKey(b[state.idCols.month]));
+  if(!rows.length){
+    container.innerHTML = '<div class="card"><div class="empty-state">चयनित फ़िल्टर में इस फैसिलिटी का कोई डेटा नहीं है</div></div>';
+    return;
+  }
+  const meta = rows[0];
+  const months = rows.map(r=>r[state.idCols.month]);
+
+  let html = '<div class="card">';
+  html += '<h2>'+esc(meta[state.idCols.sector])+' <span class="badge-type">'+esc(meta[state.idCols.type])+'</span></h2>';
+  html += '<p class="hint">ब्लॉक: '+esc(meta[state.idCols.block])+' · चयनित माह: '+months.map(monthLabel).join(", ")+'</p>';
+
+  html += '<div class="grid-stats">';
+  const scoreCol = state.idCols.score;
+  const scores = rows.map(r=>parseNum(r[scoreCol])).filter(v=>v!==null);
+  const avgScore = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null;
+  html += stat("Total Score (औसत)", avgScore!==null?fmtNum(avgScore):"—");
+  html += stat("शामिल माह", months.length);
+  html += '</div>';
+  html += '</div>';
+
+  state.groupCols.forEach(g=>{
+    html += '<details class="group-block"><summary>'+esc(g.name)+' <span class="n">'+g.cols.length+' इंडिकेटर</span></summary>';
+    html += '<div class="table-wrap"><table><thead><tr><th class="sticky-col">इंडिकेटर</th>';
+    months.forEach(m=>{ html += '<th>'+esc(monthLabel(m))+'</th>'; });
+    html += '<th>कुल / औसत</th></tr></thead><tbody>';
+    g.cols.forEach(c=>{
+      html += '<tr><td class="sticky-col">'+esc(c.label)+'</td>';
+      const vals = rows.map(r=>parseNum(r[c.col]));
+      vals.forEach(v=>{ html += '<td class="num tabular">'+fmtVal(c.col, v)+'</td>'; });
+      const nonNull = vals.filter(v=>v!==null);
+      let cum = null;
+      if(nonNull.length){
+        cum = isPercentCol(c.col) ? (nonNull.reduce((a,b)=>a+b,0)/nonNull.length) : nonNull.reduce((a,b)=>a+b,0);
+      }
+      html += '<td class="num tabular" style="font-weight:700;">'+fmtVal(c.col, cum)+'</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></details>';
+  });
+
+  container.innerHTML = html;
+}
+
+/* =========================================================================
+   BOOT
+========================================================================= */
+loadData(false);
+setInterval(()=>loadData(true), AUTO_REFRESH_MS);
+</script>
+</body>
+</html>
