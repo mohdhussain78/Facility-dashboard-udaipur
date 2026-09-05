@@ -391,6 +391,15 @@ const AVERAGE_ALWAYS_COLS = [TOTAL_SCORE_FIELD];
 // show the figure reported in the most recent selected month instead.
 const LAST_MONTH_COLS = ["No. of Doctors","No. of CHOs","No of SHC"];
 
+// True combined rate over a set of rows (e.g. several months for one facility):
+// numerator column, denominator column, and the multiplier the indicator's
+// definition uses (percentages use 100; rates like SBR use 1000, etc).
+// SBR (Still Birth Rate) = SB × 1000 ÷ ID-Facility — recomputed from the raw
+// counts rather than summed/averaged, on both Indicator View and Facility View.
+const RATE_DEFS = [
+  ["SBR", "SB", "ID-Facility", 1000]
+];
+
 // For "Facility View": when several months are selected, a % indicator's period
 // result must be the TRUE combined percentage (sum of numerator ÷ sum of
 // denominator across those months) — never a plain average of the monthly %
@@ -463,6 +472,7 @@ const state = {
   averageAlwaysCols: new Set(),
   lastMonthCols: new Set(),
   ratioMap: new Map(),   // percent-col -> {numCol, denCol} for true period recomputation
+  rateMap: new Map(),    // rate-col (e.g. SBR) -> {numCol, denCol, multiplier} for true period recomputation
   currentTab: "overview",
   indicatorMode: "matrix",
   loaded: false,
@@ -582,6 +592,11 @@ function resolveSpecialCols(){
   PERCENT_RATIO_DEFS.forEach(([pctLabel, numLabel, denLabel])=>{
     const pctCol = matchColumn(pctLabel), numCol = matchColumn(numLabel), denCol = matchColumn(denLabel);
     if(pctCol && numCol && denCol) state.ratioMap.set(pctCol, { numCol, denCol });
+  });
+  state.rateMap = new Map();
+  RATE_DEFS.forEach(([outLabel, numLabel, denLabel, multiplier])=>{
+    const outCol = matchColumn(outLabel), numCol = matchColumn(numLabel), denCol = matchColumn(denLabel);
+    if(outCol && numCol && denCol) state.rateMap.set(outCol, { numCol, denCol, multiplier });
   });
 }
 function resolveGroupCols(){
@@ -772,9 +787,26 @@ function computeActualPercent(rows, numCol, denCol){
   });
   return any && sumDen>0 ? (sumNum/sumDen*100) : null;
 }
+// Same idea as computeActualPercent but for non-percentage rates (e.g. SBR =
+// SB × 1000 ÷ ID-Facility) that use a different multiplier than 100.
+function computeActualRate(rows, numCol, denCol, multiplier){
+  let sumNum = 0, sumDen = 0, any = false;
+  rows.forEach(r=>{
+    const nv = parseNum(r[numCol]), dv = parseNum(r[denCol]);
+    if(nv===null || dv===null || dv<=0) return;
+    sumNum += nv; sumDen += dv; any = true;
+  });
+  return any && sumDen>0 ? (sumNum/sumDen*multiplier) : null;
+}
 
 function aggregateByFacility(rows, colNames){
   const map = new Map();
+  // Any column referenced as a numerator/denominator by rateMap (e.g. SB,
+  // ID-Facility for SBR) must be summed even if the caller didn't ask for it
+  // directly, so the rate can be recomputed correctly below.
+  const extraSumCols = new Set();
+  state.rateMap.forEach(({numCol, denCol})=>{ extraSumCols.add(numCol); extraSumCols.add(denCol); });
+
   rows.forEach(r=>{
     const key = facilityKey(r);
     if(!map.has(key)){
@@ -794,10 +826,21 @@ function aggregateByFacility(rows, colNames){
       e.counts[c] = (e.counts[c]||0) + 1;
       e.maxes[c] = (e.maxes[c]===undefined) ? v : Math.max(e.maxes[c], v);
     });
+    extraSumCols.forEach(c=>{
+      if(colNames.includes(c)) return; // already summed above
+      const v = parseNum(r[c]);
+      if(v===null) return;
+      e.sums[c] = (e.sums[c]||0) + v;
+    });
   });
   return Array.from(map.values()).map(e=>{
     const vals = {};
     colNames.forEach(c=>{
+      if(state.rateMap.has(c)){
+        const {numCol, denCol, multiplier} = state.rateMap.get(c);
+        vals[c] = e.sums[denCol] ? ((e.sums[numCol]||0) * multiplier / e.sums[denCol]) : null;
+        return;
+      }
       if(state.lastMonthCols.has(c)){
         vals[c] = e.latestRow ? parseNum(e.latestRow[c]) : null;
         return;
@@ -1127,11 +1170,17 @@ function renderFacilityPage(){
     html += '<th>कुल/असली %/नवीनतम/अधिकतम</th></tr></thead><tbody>';
     g.cols.forEach(c=>{
       html += '<tr><td class="sticky-col">'+esc(c.label)+'</td>';
-      const vals = rows.map(r=>parseNum(r[c.col]));
+      const rm8 = state.rateMap.get(c.col);
+      const vals = rm8
+        ? rows.map(r=>{ const nv=parseNum(r[rm8.numCol]), dv=parseNum(r[rm8.denCol]); return (nv!==null && dv) ? (nv*rm8.multiplier/dv) : null; })
+        : rows.map(r=>parseNum(r[c.col]));
       vals.forEach(v=>{ html += '<td class="num tabular">'+fmtVal(c.col, v)+'</td>'; });
       const nonNull = vals.filter(v=>v!==null);
       let cum = null;
-      if(state.ratioMap.has(c.col)){
+      if(rm8){
+        // दर इंडिकेटर (जैसे SBR) — सभी चयनित माह के अंश-योग व हर-योग से पुनर्गणना
+        cum = computeActualRate(rows, rm8.numCol, rm8.denCol, rm8.multiplier);
+      } else if(state.ratioMap.has(c.col)){
         // % इंडिकेटर — असली संयुक्त प्रतिशत = सभी चयनित माह के अंश-योग ÷ हर-योग (औसत नहीं)
         const rm = state.ratioMap.get(c.col);
         cum = computeActualPercent(rows, rm.numCol, rm.denCol);
@@ -1176,10 +1225,15 @@ function printFacilityFlat(){
   body += '<th>कुल/असली %/नवीनतम/अधिकतम</th></tr></thead><tbody>';
   state.groupCols.forEach(g=>{
     g.cols.forEach(c=>{
-      const vals = rows.map(r=>parseNum(r[c.col]));
+      const rm8 = state.rateMap.get(c.col);
+      const vals = rm8
+        ? rows.map(r=>{ const nv=parseNum(r[rm8.numCol]), dv=parseNum(r[rm8.denCol]); return (nv!==null && dv) ? (nv*rm8.multiplier/dv) : null; })
+        : rows.map(r=>parseNum(r[c.col]));
       const nonNull = vals.filter(v=>v!==null);
       let cum = null;
-      if(state.ratioMap.has(c.col)){
+      if(rm8){
+        cum = computeActualRate(rows, rm8.numCol, rm8.denCol, rm8.multiplier);
+      } else if(state.ratioMap.has(c.col)){
         const rm = state.ratioMap.get(c.col);
         cum = computeActualPercent(rows, rm.numCol, rm.denCol);
       } else if(nonNull.length){
