@@ -110,6 +110,11 @@ button{font-family:inherit;}
 }
 .filter-reset:hover{border-color:var(--bad);color:var(--bad);}
 .filter-summary{margin-inline-start:auto;font-size:12px;color:var(--muted);}
+.filter-totals{
+  display:flex;flex-wrap:wrap;gap:6px 16px;padding:6px 22px 10px;background:var(--surface);
+  border-bottom:1px solid var(--border);font-size:11.5px;color:var(--muted);
+}
+.filter-totals .ftotal-item b{color:var(--ink);font-weight:700;}
 
 /* ---------- tabs ---------- */
 .tabs{
@@ -152,6 +157,7 @@ thead th{
   font-weight:700;color:var(--primary-dark);border-bottom:1px solid var(--border);white-space:nowrap;
   cursor:pointer;user-select:none;
 }
+thead th.wrap-col{white-space:normal;max-width:130px;min-width:90px;line-height:1.25;vertical-align:bottom;}
 thead th.sticky-col, tbody td.sticky-col{position:sticky;left:0;background:var(--surface);z-index:2;}
 thead th.sticky-col{background:var(--surface-2);z-index:5;}
 thead th:hover{color:var(--primary);}
@@ -224,6 +230,13 @@ footer .foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;max-wi
 .loading-row{display:flex;align-items:center;gap:10px;padding:30px;color:var(--muted);font-size:13px;}
 .spinner{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--primary);animation:spin 0.7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
+
+@media print{
+  .topbar, .filterbar, .filter-totals, .tabs, footer, .no-print, .facility-picker { display:none !important; }
+  details.group-block { break-inside:avoid; }
+  body{ background:#fff; }
+  .card{ box-shadow:none; border:none; }
+}
 </style>
 </head>
 <body>
@@ -244,6 +257,10 @@ footer .foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;max-wi
 
 <nav class="filterbar" id="filterbar">
   <div class="filter-group">
+    <button class="filter-btn" data-filter="district">डिस्ट्रिक्ट <span class="badge" id="badge-district">0</span> <span class="chev">▾</span></button>
+    <div class="filter-panel" id="panel-district"></div>
+  </div>
+  <div class="filter-group">
     <button class="filter-btn" data-filter="block">ब्लॉक <span class="badge" id="badge-block">0</span> <span class="chev">▾</span></button>
     <div class="filter-panel" id="panel-block"></div>
   </div>
@@ -262,6 +279,7 @@ footer .foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;max-wi
   <button class="filter-reset" id="resetFilters">फ़िल्टर रीसेट</button>
   <div class="filter-summary" id="filterSummary"></div>
 </nav>
+<div class="filter-totals" id="filterTotals"></div>
 
 <nav class="tabs" id="tabs">
   <button class="tab active" data-tab="overview">सारांश</button>
@@ -349,16 +367,32 @@ footer .foot-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;max-wi
 const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRMrTmB8YSl9BfTGzrPQmhx3e6SBww-tf0Y1hr1Smqq_-cIxt7vcM03-lh1kMvypnrrJBCSt53u1Q-8/pub?output=csv";
 const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
 
-const ID_FIELDS = { block:"Block", sector:"Sector", type:"Type of facility", year:"Year", month:"Month" };
+const ID_FIELDS = { district:"District", block:"Block", sector:"Sector", type:"Type of facility", year:"Year", month:"Month" };
 const TOTAL_SCORE_FIELD = "Total Score";
+const FILTER_KEYS = ["district","block","year","month","ftype"];
+
+// Columns whose name contains "%" but are NOT actually a percentage (so they must
+// never be averaged/formatted as %) — e.g. "S -form reported by SCs =>90%" is a
+// count of sub-centres, the ">90%" is just part of the indicator's name.
+const FORCE_NON_PERCENT = ["S -form reported by SCs =>90%"];
+
+// Columns that should never be summed across multiple selected months — instead
+// the HIGHEST value across the selected months is shown (Population is a static,
+// one-time figure; Drugs/Investigation availability is a status, not a monthly
+// cumulative count).
+const MAX_AGG_COLS = ["Population","Drugs available","No of investigation available"];
+
+// Columns that must always be averaged across months, never summed — even though
+// their name has no "%" (Total Score is already a 0–100 score).
+const AVERAGE_ALWAYS_COLS = [TOTAL_SCORE_FIELD];
 
 const GROUPS = [
   { name:"ANC Services", items:["Target ANC","ANC Rep","% ANC Rep.","ANC LL","%ANC LL/Rep.","ANC 12 Rep","% ANC 12 rep.","ANC 12 LL","% ANC 12 LL/rep","4 ANC rep","% 4 ANC rep","4 ANC LL","% 4 ANC LL/Rep","HRP","% HRP"] },
   { name:"Delivery Services", items:["ELA Del","ID-Facility","Del LL","% ID LL/ELA","SB","SBR","Mis.Del.","% Mis.Del./ELA","5PNC","% 5 PNC","JSY","% JSY","Girl Child","RSY 1st","% RSY 1st"] },
   { name:"Immunization Services", items:["ELA FI","FI rep.","% FI Rep/ELA","FI LL","% FI LL/Rep.","Hip 0","% hip 0 Dose","BCG","Pent 1","Pent3","MR 1","MR 2","Missing FI","P1 to P3","M1 to M2","% Missing FI","DO P1 to P3","DO M1 to M2","Total immunisation Sessioned planned","Total Session held","% Sessions held","Total vaccination done","Avg. vaccination"] },
   { name:"Family Planning Services", items:["ID-Facility","ELA Str","Str","% Str.","PPIUCD","% PPIUCD","ELA Antra","ANTRA 1st","% Antra","Stock out N=1,Y=2","Expiry N=1 Y=2"] },
-  { name:"Clinical Services", items:["No. of Doctors","No. of CHOs","No of SHC","Population","Monthly OPD","daily OPD/doctor","Total Blood Slides Collected","% Blood slides collected","Drugs available","No of investigation available","Total IPD","TID booked under MAA","% TID booked/IPD","S -form reported by SCs =>90%","% SC reporting >90%","P form reported >90%","L Form reported days","Total ASHA","Total Incentive dispersed","Average incentive disperesed"] },
-  { name:"AAM", items:["Total CHOs initiated screening for Expanded Services.","% Total CHOs initiated screening for Expanded Services.","No of SHCs having >45 drugs","% SHC having >45","No of SHCs providing Diagnostic >7","% SHC providing Investigation >7","No of CHOs using CHO soft","% CHOs using CHO Soft"] },
+  { name:"Clinical Services", items:["No. of Doctors","No. of CHOs","No of SHC","Population","Monthly OPD","daily OPD/doctor","Total Blood Slides Collected","% Blood slides collected","Drugs available","No of investigation available","Total IPD","TID booked under MAA","% TID booked/IPD","S -form reported by SCs =>90%","% SC reporting >90%","P form reported >90%","L Form reported days","Total ASHA","Total Incentive dispersed","Average incentive disperesed","OPD Pharmacy","% OPD","S- OPD Pharmacy"] },
+  { name:"AAM", items:["No. of CHOs","No of SHC","Total CHOs initiated screening for Expanded Services.","% Total CHOs initiated screening for Expanded Services.","No of SHCs having >45 drugs","% SHC having >45","No of SHCs providing Diagnostic >7","% SHC providing Investigation >7","No of CHOs using CHO soft","% CHOs using CHO Soft"] },
   { name:"NCD", items:["Total ELA (population >30+yrs)","people screened HT","% people screened HT","HT - receiving treatment","% receiving treatment","People screened diabetes","% People screened diabetes","Diabetes receiving treatment","%Diabetes receiving treatment"] },
   { name:"TB", items:["Estimated TB patient","Total TB Patients Notified","% TB Patients Notified","Total TB Cases Successfully Treated","% TB Cases Successfully Treated","Total TB patients assessed for differentiated care","% TB patients assessed for differentiated care"] }
 ];
@@ -372,8 +406,11 @@ const state = {
   colIndexByNorm: {},    // normalized -> original header
   idCols: {},             // resolved original header names for id fields
   groupCols: [],          // GROUPS resolved to actual columns [{name, cols:[{label,col}]}]
-  values: { block:[], year:[], month:[], ftype:[] },
-  filters: { block:new Set(), year:new Set(), month:new Set(), ftype:new Set() },
+  values: { district:[], block:[], year:[], month:[], ftype:[] },
+  filters: { district:new Set(), block:new Set(), year:new Set(), month:new Set(), ftype:new Set() },
+  forceNonPercentCols: new Set(),
+  maxAggCols: new Set(),
+  averageAlwaysCols: new Set(),
   currentTab: "overview",
   indicatorMode: "matrix",
   loaded: false,
@@ -394,7 +431,10 @@ function parseNum(v){
   const n = parseFloat(String(v).replace(/,/g,"").replace("%","").trim());
   return isNaN(n) ? null : n;
 }
-function isPercentCol(colName){ return colName.indexOf("%") !== -1; }
+function isPercentCol(colName){
+  if(state.forceNonPercentCols.has(colName)) return false;
+  return colName.indexOf("%") !== -1;
+}
 
 function fmtNum(n){
   if(n===null||n===undefined||isNaN(n)) return "—";
@@ -436,6 +476,7 @@ async function loadData(isAuto){
     state.columns = parsed.meta.fields || Object.keys(parsed.data[0]);
     buildColumnIndex();
     resolveIdCols();
+    resolveSpecialCols();
     resolveGroupCols();
     computeFilterValues();
     // default: select everything on first load; keep existing selection on refresh if still valid
@@ -469,6 +510,7 @@ function matchColumn(name){
 }
 function resolveIdCols(){
   state.idCols = {
+    district: matchColumn(ID_FIELDS.district) || ID_FIELDS.district,
     block: matchColumn(ID_FIELDS.block) || ID_FIELDS.block,
     sector: matchColumn(ID_FIELDS.sector) || ID_FIELDS.sector,
     type: matchColumn(ID_FIELDS.type) || ID_FIELDS.type,
@@ -476,6 +518,11 @@ function resolveIdCols(){
     month: matchColumn(ID_FIELDS.month) || ID_FIELDS.month,
     score: matchColumn(TOTAL_SCORE_FIELD) || TOTAL_SCORE_FIELD,
   };
+}
+function resolveSpecialCols(){
+  state.forceNonPercentCols = new Set(FORCE_NON_PERCENT.map(matchColumn).filter(Boolean));
+  state.maxAggCols = new Set(MAX_AGG_COLS.map(matchColumn).filter(Boolean));
+  state.averageAlwaysCols = new Set(AVERAGE_ALWAYS_COLS.map(matchColumn).filter(Boolean));
 }
 function resolveGroupCols(){
   state.groupCols = GROUPS.map(g => ({
@@ -487,20 +534,22 @@ function resolveGroupCols(){
   })).filter(g => g.cols.length);
 }
 function computeFilterValues(){
-  const b=new Set(), y=new Set(), m=new Set(), f=new Set();
+  const d=new Set(), b=new Set(), y=new Set(), m=new Set(), f=new Set();
   state.rows.forEach(r=>{
+    if(r[state.idCols.district]) d.add(r[state.idCols.district]);
     if(r[state.idCols.block]) b.add(r[state.idCols.block]);
     if(r[state.idCols.year]) y.add(r[state.idCols.year]);
     if(r[state.idCols.month]) m.add(r[state.idCols.month]);
     if(r[state.idCols.type]) f.add(r[state.idCols.type]);
   });
+  state.values.district = Array.from(d).sort();
   state.values.block = Array.from(b).sort();
   state.values.year = Array.from(y).sort();
   state.values.month = Array.from(m).sort((a,b)=>monthSortKey(a)-monthSortKey(b));
   state.values.ftype = Array.from(f).sort();
 }
 function seedFilters(){
-  ["block","year","month","ftype"].forEach(k=>{
+  FILTER_KEYS.forEach(k=>{
     const existing = state.filters[k];
     const universe = state.values[k];
     if(existing.size===0){
@@ -540,12 +589,20 @@ function renderFatalError(){
 /* =========================================================================
    FILTER UI
 ========================================================================= */
-const FILTER_LABELS = { block:"ब्लॉक", year:"वर्ष", month:"माह", ftype:"फैसिलिटी टाइप" };
+const FILTER_LABELS = { district:"डिस्ट्रिक्ट", block:"ब्लॉक", year:"वर्ष", month:"माह", ftype:"फैसिलिटी टाइप" };
 
 function renderFilterUI(){
-  ["block","year","month","ftype"].forEach(renderFilterPanel);
+  FILTER_KEYS.forEach(renderFilterPanel);
   updateFilterBadges();
   updateFilterSummary();
+  renderFilterTotals();
+}
+function renderFilterTotals(){
+  const box = document.getElementById("filterTotals");
+  if(!box) return;
+  box.innerHTML = FILTER_KEYS.map(k=>
+    '<span class="ftotal-item"><b>'+esc(FILTER_LABELS[k])+':</b> कुल '+state.values[k].length+' · चयनित '+state.filters[k].size+'</span>'
+  ).join("");
 }
 function renderFilterPanel(key){
   const panel = document.getElementById("panel-" + key);
@@ -571,15 +628,15 @@ function filterPanelSearch(key, q){
 }
 function toggleFilterValue(key, val, checked){
   if(checked) state.filters[key].add(val); else state.filters[key].delete(val);
-  updateFilterBadges(); updateFilterSummary(); renderAll();
+  updateFilterBadges(); updateFilterSummary(); renderFilterTotals(); renderAll();
 }
 function setAllFilter(key, all){
   state.filters[key] = new Set(all ? state.values[key] : []);
   renderFilterPanel(key);
-  updateFilterBadges(); updateFilterSummary(); renderAll();
+  updateFilterBadges(); updateFilterSummary(); renderFilterTotals(); renderAll();
 }
 function updateFilterBadges(){
-  ["block","year","month","ftype"].forEach(k=>{
+  FILTER_KEYS.forEach(k=>{
     document.getElementById("badge-"+k).textContent = state.filters[k].size + "/" + state.values[k].length;
   });
 }
@@ -601,11 +658,11 @@ document.addEventListener("click", (e)=>{
   });
 });
 document.getElementById("resetFilters").addEventListener("click", ()=>{
-  ["block","year","month","ftype"].forEach(k=>{
+  FILTER_KEYS.forEach(k=>{
     state.filters[k] = new Set(state.values[k]);
     renderFilterPanel(k);
   });
-  updateFilterBadges(); updateFilterSummary(); renderAll();
+  updateFilterBadges(); updateFilterSummary(); renderFilterTotals(); renderAll();
 });
 document.getElementById("refreshBtn").addEventListener("click", ()=>loadData(false));
 
@@ -630,12 +687,17 @@ function getFilteredRows(){
   if(!state.loaded) return [];
   const f = state.filters, ic = state.idCols;
   return state.rows.filter(r =>
-    f.block.has(r[ic.block]) && f.year.has(r[ic.year]) && f.month.has(r[ic.month]) && f.ftype.has(r[ic.type])
+    f.district.has(r[ic.district]) && f.block.has(r[ic.block]) && f.year.has(r[ic.year]) && f.month.has(r[ic.month]) && f.ftype.has(r[ic.type])
   );
 }
 
 /* Aggregate a set of rows by facility for a list of column names.
    Percent columns -> mean across matched rows; other numeric columns -> sum. */
+// Aggregation rule per column, in priority order:
+//  1. AVERAGE_ALWAYS_COLS (e.g. Total Score) -> mean, regardless of "%" in name
+//  2. percent columns (isPercentCol, honouring FORCE_NON_PERCENT) -> mean
+//  3. MAX_AGG_COLS (Population, Drugs available, No of investigation available) -> max
+//  4. everything else -> sum
 function aggregateByFacility(rows, colNames){
   const map = new Map();
   rows.forEach(r=>{
@@ -643,7 +705,7 @@ function aggregateByFacility(rows, colNames){
     if(!map.has(key)){
       map.set(key, {
         block: r[state.idCols.block], facility: r[state.idCols.sector], type: r[state.idCols.type],
-        sums:{}, counts:{}, monthCount:0
+        sums:{}, counts:{}, maxes:{}, monthCount:0
       });
     }
     const e = map.get(key);
@@ -653,13 +715,17 @@ function aggregateByFacility(rows, colNames){
       if(v===null) return;
       e.sums[c] = (e.sums[c]||0) + v;
       e.counts[c] = (e.counts[c]||0) + 1;
+      e.maxes[c] = (e.maxes[c]===undefined) ? v : Math.max(e.maxes[c], v);
     });
   });
   return Array.from(map.values()).map(e=>{
     const vals = {};
     colNames.forEach(c=>{
-      if(e.counts[c]) vals[c] = isPercentCol(c) ? (e.sums[c]/e.counts[c]) : e.sums[c];
-      else vals[c] = null;
+      if(!e.counts[c]){ vals[c] = null; return; }
+      if(state.averageAlwaysCols.has(c)) vals[c] = e.sums[c]/e.counts[c];
+      else if(isPercentCol(c)) vals[c] = e.sums[c]/e.counts[c];
+      else if(state.maxAggCols.has(c)) vals[c] = e.maxes[c];
+      else vals[c] = e.sums[c];
     });
     return { block:e.block, facility:e.facility, type:e.type, monthCount:e.monthCount, vals };
   });
@@ -810,18 +876,36 @@ function renderMatrixTable(){
     if(av>bv) return sortDir==="asc"?1:-1;
     return 0;
   });
+  // per-column min/max across the (already sorted) facility set, for heatmap shading
+  const range = {};
+  cols.forEach(c=>{
+    const vs = agg.map(a=>a.vals[c.col]).filter(v=>v!==null && !isNaN(v));
+    range[c.col] = vs.length ? { min:Math.min(...vs), max:Math.max(...vs) } : null;
+  });
+
   let html = '<div class="table-wrap"><table><thead><tr>';
   html += '<th class="sticky-col" onclick="sortMatrix(\'facility\')">फैसिलिटी'+sortArrow("facility")+'</th>';
   html += '<th onclick="sortMatrix(\'block\')">ब्लॉक'+sortArrow("block")+'</th>';
-  cols.forEach(c=>{ html += '<th onclick="sortMatrix(\''+esc(c.col).replace(/'/g,"&#39;")+'\')" title="'+esc(c.label)+'">'+esc(c.label)+sortArrow(c.col)+'</th>'; });
+  cols.forEach(c=>{ html += '<th class="wrap-col" onclick="sortMatrix(\''+esc(c.col).replace(/'/g,"&#39;")+'\')" title="'+esc(c.label)+'">'+esc(c.label)+sortArrow(c.col)+'</th>'; });
   html += '</tr></thead><tbody>';
   sorted.forEach(a=>{
     html += '<tr><td class="sticky-col">'+esc(a.facility)+'</td><td>'+esc(a.block)+'</td>';
-    cols.forEach(c=>{ html += '<td class="num tabular">'+fmtVal(c.col, a.vals[c.col])+'</td>'; });
+    cols.forEach(c=>{
+      const v = a.vals[c.col];
+      html += '<td class="num tabular" style="'+heatStyle(v, range[c.col])+'">'+fmtVal(c.col, v)+'</td>';
+    });
     html += '</tr>';
   });
   html += '</tbody></table></div>';
   document.getElementById("indicatorContent").innerHTML = html;
+}
+// Colour a cell along a red -> yellow -> green scale by where its value falls
+// within that column's min–max range (heatmap instead of a plain number grid).
+function heatStyle(v, r){
+  if(v===null || v===undefined || isNaN(v) || !r || r.max===r.min) return "";
+  const t = Math.max(0, Math.min(1, (v - r.min) / (r.max - r.min)));
+  const hue = t * 122; // 0=red, ~60=yellow, 122=green
+  return "background:hsl("+hue.toFixed(0)+",70%,88%);";
 }
 function sortArrow(key){
   if(window.__matrixSort.key!==key) return "";
@@ -938,9 +1022,13 @@ function renderFacilityPage(){
   const meta = rows[0];
   const months = rows.map(r=>r[state.idCols.month]);
 
-  let html = '<div class="card">';
+  let html = '<div class="card" id="facilityPrintHead">';
   html += '<h2>'+esc(meta[state.idCols.sector])+' <span class="badge-type">'+esc(meta[state.idCols.type])+'</span></h2>';
-  html += '<p class="hint">ब्लॉक: '+esc(meta[state.idCols.block])+' · चयनित माह: '+months.map(monthLabel).join(", ")+'</p>';
+  html += '<p class="hint">डिस्ट्रिक्ट: '+esc(meta[state.idCols.district])+' · ब्लॉक: '+esc(meta[state.idCols.block])+' · चयनित माह: '+months.map(monthLabel).join(", ")+'</p>';
+  html += '<div class="no-print" style="display:flex;gap:8px;margin-bottom:4px;">';
+  html += '<button class="btn-ghost" style="background:var(--primary-soft);color:var(--primary-dark);border-color:var(--border);" onclick="printFacilityGrouped()">🖨 ग्रुप-वार प्रिंट करें</button>';
+  html += '<button class="btn-ghost" style="background:var(--primary-soft);color:var(--primary-dark);border-color:var(--border);" onclick="printFacilityFlat()">🖨 सभी इंडिकेटर एक साथ प्रिंट करें</button>';
+  html += '</div>';
 
   html += '<div class="grid-stats">';
   const scoreCol = state.idCols.score;
@@ -955,7 +1043,7 @@ function renderFacilityPage(){
     html += '<details class="group-block"><summary>'+esc(g.name)+' <span class="n">'+g.cols.length+' इंडिकेटर</span></summary>';
     html += '<div class="table-wrap"><table><thead><tr><th class="sticky-col">इंडिकेटर</th>';
     months.forEach(m=>{ html += '<th>'+esc(monthLabel(m))+'</th>'; });
-    html += '<th>कुल / औसत</th></tr></thead><tbody>';
+    html += '<th>योग/औसत/अधिकतम</th></tr></thead><tbody>';
     g.cols.forEach(c=>{
       html += '<tr><td class="sticky-col">'+esc(c.label)+'</td>';
       const vals = rows.map(r=>parseNum(r[c.col]));
@@ -963,7 +1051,9 @@ function renderFacilityPage(){
       const nonNull = vals.filter(v=>v!==null);
       let cum = null;
       if(nonNull.length){
-        cum = isPercentCol(c.col) ? (nonNull.reduce((a,b)=>a+b,0)/nonNull.length) : nonNull.reduce((a,b)=>a+b,0);
+        if(state.averageAlwaysCols.has(c.col) || isPercentCol(c.col)) cum = nonNull.reduce((a,b)=>a+b,0)/nonNull.length;
+        else if(state.maxAggCols.has(c.col)) cum = Math.max(...nonNull);
+        else cum = nonNull.reduce((a,b)=>a+b,0);
       }
       html += '<td class="num tabular" style="font-weight:700;">'+fmtVal(c.col, cum)+'</td>';
       html += '</tr>';
@@ -972,6 +1062,53 @@ function renderFacilityPage(){
   });
 
   container.innerHTML = html;
+}
+
+// Group-wise print: uses the existing on-screen <details> layout, just forces
+// every group open first (closed <details> content is hidden even in print).
+function printFacilityGrouped(){
+  document.querySelectorAll("#facilityDetail details.group-block").forEach(d => d.open = true);
+  window.print();
+}
+
+// Flat print: one continuous table with every indicator from every group,
+// opened in a new tab so the live dashboard's own state/filters are untouched.
+function printFacilityFlat(){
+  if(!selectedFacility){ return; }
+  const rows = getFilteredRows().filter(r=>facilityKey(r)===selectedFacility)
+    .sort((a,b)=>monthSortKey(a[state.idCols.month])-monthSortKey(b[state.idCols.month]));
+  if(!rows.length) return;
+  const meta = rows[0];
+  const months = rows.map(r=>r[state.idCols.month]);
+
+  let body = '<h1 style="font-family:sans-serif;">'+esc(meta[state.idCols.sector])+' ('+esc(meta[state.idCols.type])+')</h1>';
+  body += '<p style="font-family:sans-serif;color:#555;">डिस्ट्रिक्ट: '+esc(meta[state.idCols.district])+' · ब्लॉक: '+esc(meta[state.idCols.block])+' · माह: '+months.map(monthLabel).join(", ")+'</p>';
+  body += '<table border="1" cellspacing="0" cellpadding="5" style="border-collapse:collapse;font-family:sans-serif;font-size:12px;width:100%;">';
+  body += '<thead><tr><th>ग्रुप</th><th>इंडिकेटर</th>';
+  months.forEach(m=>{ body += '<th>'+esc(monthLabel(m))+'</th>'; });
+  body += '<th>योग/औसत/अधिकतम</th></tr></thead><tbody>';
+  state.groupCols.forEach(g=>{
+    g.cols.forEach(c=>{
+      const vals = rows.map(r=>parseNum(r[c.col]));
+      const nonNull = vals.filter(v=>v!==null);
+      let cum = null;
+      if(nonNull.length){
+        if(state.averageAlwaysCols.has(c.col) || isPercentCol(c.col)) cum = nonNull.reduce((a,b)=>a+b,0)/nonNull.length;
+        else if(state.maxAggCols.has(c.col)) cum = Math.max(...nonNull);
+        else cum = nonNull.reduce((a,b)=>a+b,0);
+      }
+      body += '<tr><td>'+esc(g.name)+'</td><td>'+esc(c.label)+'</td>';
+      vals.forEach(v=>{ body += '<td style="text-align:right;">'+fmtVal(c.col, v)+'</td>'; });
+      body += '<td style="text-align:right;font-weight:700;">'+fmtVal(c.col, cum)+'</td></tr>';
+    });
+  });
+  body += '</tbody></table>';
+
+  const w = window.open("", "_blank");
+  w.document.write('<html><head><title>'+esc(meta[state.idCols.sector])+' — सभी इंडिकेटर</title></head><body>'+body+'</body></html>');
+  w.document.close();
+  w.focus();
+  setTimeout(()=>w.print(), 300);
 }
 
 /* =========================================================================
