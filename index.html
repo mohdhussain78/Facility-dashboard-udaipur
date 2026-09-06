@@ -386,64 +386,129 @@ const MAX_AGG_COLS = ["Population","Drugs available","No of investigation availa
 // their name has no "%" (Total Score is already a 0–100 score).
 const AVERAGE_ALWAYS_COLS = [TOTAL_SCORE_FIELD];
 
-// Columns that are point-in-time staffing/infrastructure counts, not monthly
-// cumulative activity — when several months are selected these must NOT be summed;
-// show the figure reported in the most recent selected month instead.
-const LAST_MONTH_COLS = ["No. of Doctors","No. of CHOs","No of SHC"];
+// Columns that are point-in-time staffing/infrastructure/status counts, not
+// monthly cumulative activity — when several months are selected these must
+// NOT be summed; show the figure reported in the most recent selected month
+// instead. (Stock-out/Expiry are coded flags — N=1/Y=2 — so summing them across
+// months is meaningless; the latest month's flag is the only sensible figure.)
+const LAST_MONTH_COLS = ["No. of Doctors","No. of CHOs","No of SHC","Stock out N=1,Y=2","Expiry N=1 Y=2"];
 
-// True combined rate over a set of rows (e.g. several months for one facility):
-// numerator column, denominator column, and the multiplier the indicator's
-// definition uses (percentages use 100; rates like SBR use 1000, etc).
-// SBR (Still Birth Rate) = SB × 1000 ÷ ID-Facility — recomputed from the raw
-// counts rather than summed/averaged, on both Indicator View and Facility View.
-const RATE_DEFS = [
-  ["SBR", "SB", "ID-Facility", 1000]
+// =========================================================================
+// NUMERATOR / DENOMINATOR FORMULAS — from Formula.docx (authoritative).
+// When several months are selected, every indicator listed here is recomputed
+// from the SUMMED numerator ÷ (summed or latest, per LAST_MONTH_COLS above)
+// denominator — never from a plain average of each month's own % figure.
+// This applies identically on the Indicator View, Top/Bottom-15, and
+// Facility View pages.
+//
+// Each row: [indicator, numeratorExpr, denominatorExpr, multiplier, isPercentFormat]
+// An expr is normally just a column name. Two special forms from the docx are
+// also supported: "(A-B)" (difference of two columns, e.g. drop-out counts)
+// and "(A/30)" (a column divided by a constant, e.g. a monthly total turned
+// into a daily figure). See parseRatioExpr().
+// =========================================================================
+const RATIO_DEFS = [
+  // ---- "Result in %" rows from Formula.docx ----
+  ["% ANC Rep.", "ANC Rep", "Target ANC", 100, true],
+  ["%ANC LL/Rep.", "ANC LL", "ANC Rep", 100, true],
+  ["% ANC 12 rep.", "ANC 12 Rep", "Target ANC", 100, true],
+  ["% ANC 12 LL/rep", "ANC 12 LL", "ANC 12 Rep", 100, true],
+  ["% 4 ANC rep", "4 ANC rep", "Target ANC", 100, true],
+  ["% 4 ANC LL/Rep", "4 ANC LL", "4 ANC rep", 100, true],
+  ["% HRP", "HRP", "ANC LL", 100, true],
+  ["% ID LL/ELA", "Del LL", "ELA Del", 100, true],
+  ["% Mis.Del./ELA", "Mis.Del.", "ELA Del", 100, true],
+  ["% 5 PNC", "5PNC", "Del LL", 100, true],
+  ["% FI Rep/ELA", "FI rep.", "ELA FI", 100, true],
+  ["% FI LL/Rep.", "FI LL", "FI rep.", 100, true],
+  ["% Missing FI", "Missing FI", "ELA FI", 100, true],
+  ["% Str.", "Str", "ELA Str", 100, true],
+  ["% PPIUCD", "PPIUCD", "ID-Facility", 100, true],
+  ["% Antra", "ANTRA 1st", "ELA Antra", 100, true],
+  ["% Blood slides collected", "Total Blood Slides Collected", "Monthly OPD", 100, true],
+  ["% Total CHOs initiated screening for Expanded Services.", "Total CHOs initiated screening for Expanded Services.", "No. of CHOs", 100, true],
+  ["% SHC having >45 drugs", "No of SHCs having >45 drugs", "No of SHC", 100, true],
+  ["% CHOs using CHO Soft", "No of CHOs using CHO soft", "No. of CHOs", 100, true],
+  ["% people screened HT", "people screened HT", "Total ELA (population >30+yrs)", 100, true],
+  ["% receiving treatment", "HT - receiving treatment", "people screened HT", 100, true],
+  ["% People screened diabetes", "People screened diabetes", "Total ELA (population >30+yrs)", 100, true],
+  ["%Diabetes receiving treatment", "Diabetes receiving treatment", "People screened diabetes", 100, true],
+  ["% Sessions held", "Total Session held", "Total immunisation Sessioned planned", 100, true],
+  ["Avg. vaccination", "Total vaccination done", "Total Session held", 100, true],
+  ["% TID booked/IPD", "TID booked under MAA", "Total IPD", 100, true],
+  ["% SC reporting >90%", "S -form reported by SCs =>90%", "No of SHC", 100, true],
+  ["% TB Patients Notified", "Total TB Patients Notified", "Estimated TB patient", 100, true],
+  ["% TB Cases Successfully Treated", "Total TB Cases Successfully Treated", "Total TB Patients Notified", 100, true],
+  ["% TB patients assessed for differentiated care", "Total TB patients assessed for differentiated care", "Total TB Patients Notified", 100, true],
+  // ---- "Drop out rate" rows (docx) — shown as %, per standard RCH-MIS convention ----
+  ["DO P1 to P3", "(Pent 1-Pent3)", "Pent 1", 100, true],
+  ["DO M1 to M2", "(MR 1-MR 2)", "MR 1", 100, true],
+  // ---- "Average" rows (docx) — plain ratio, NOT a percentage ----
+  ["daily OPD/doctor", "(Monthly OPD/30)", "No. of Doctors", 1, false],
+  ["Average incentive disperesed", "Total Incentive dispersed", "Total ASHA", 1, false],
+  // ---- rate (per-1000), not in the docx table but same "recompute, don't average" rule ----
+  ["SBR", "SB", "ID-Facility", 1000, false],
+  // ---- kept from earlier work (not covered by Formula.docx; best available pairing) ----
+  ["% JSY", "JSY", "ID-Facility", 100, true],
+  ["% RSY 1st", "RSY 1st", "Girl Child", 100, true],
+  ["% hip 0 Dose", "Hip 0", "ID-Facility", 100, true],
+  ["% OPD", "OPD Pharmacy", "Monthly OPD", 100, true],
+  ["% SHC providing Investigation >7", "No of SHCs providing Diagnostic >7", "No of SHC", 100, true],
 ];
 
-// For "Facility View": when several months are selected, a % indicator's period
-// result must be the TRUE combined percentage (sum of numerator ÷ sum of
-// denominator across those months) — never a plain average of the monthly %
-// figures. Pairs below are the ones whose numerator/denominator are unambiguous
-// from the sheet's own column names/standard RCH-MIS definitions. % indicators
-// NOT listed here have no safely-inferable denominator in the sheet, so they
-// fall back to showing the most recently reported month's actual value.
-const PERCENT_RATIO_DEFS = [
-  ["% ANC Rep.", "ANC Rep", "Target ANC"],
-  ["%ANC LL/Rep.", "ANC LL", "ANC Rep"],
-  ["% ANC 12 rep.", "ANC 12 Rep", "Target ANC"],
-  ["% ANC 12 LL/rep", "ANC 12 LL", "ANC 12 Rep"],
-  ["% 4 ANC rep", "4 ANC rep", "ANC Rep"],
-  ["% 4 ANC LL/Rep", "4 ANC LL", "4 ANC rep"],
-  ["% HRP", "HRP", "ANC Rep"],
-  ["% ID LL/ELA", "Del LL", "ELA Del"],
-  ["% Mis.Del./ELA", "Mis.Del.", "ELA Del"],
-  ["% 5 PNC", "5PNC", "Del LL"],
-  ["% JSY", "JSY", "ID-Facility"],
-  ["% RSY 1st", "RSY 1st", "Girl Child"],
-  ["% FI Rep/ELA", "FI rep.", "ELA FI"],
-  ["% FI LL/Rep.", "FI LL", "FI rep."],
-  ["% hip 0 Dose", "Hip 0", "ID-Facility"],
-  ["% Missing FI", "Missing FI", "FI rep."],
-  ["% Sessions held", "Total Session held", "Total immunisation Sessioned planned"],
-  ["% Str.", "Str", "ELA Str"],
-  ["% PPIUCD", "PPIUCD", "ELA Str"],
-  ["% Antra", "ANTRA 1st", "ELA Antra"],
-  ["% TID booked/IPD", "TID booked under MAA", "Total IPD"],
-  ["% Blood slides collected", "Total Blood Slides Collected", "Monthly OPD"],
-  ["% SC reporting >90%", "S -form reported by SCs =>90%", "No of SHC"],
-  ["% OPD", "OPD Pharmacy", "Monthly OPD"],
-  ["% Total CHOs initiated screening for Expanded Services.", "Total CHOs initiated screening for Expanded Services.", "No. of CHOs"],
-  ["% SHC having >45", "No of SHCs having >45 drugs", "No of SHC"],
-  ["% SHC providing Investigation >7", "No of SHCs providing Diagnostic >7", "No of SHC"],
-  ["% CHOs using CHO Soft", "No of CHOs using CHO soft", "No. of CHOs"],
-  ["% people screened HT", "people screened HT", "Total ELA (population >30+yrs)"],
-  ["% receiving treatment", "HT - receiving treatment", "people screened HT"],
-  ["% People screened diabetes", "People screened diabetes", "Total ELA (population >30+yrs)"],
-  ["%Diabetes receiving treatment", "Diabetes receiving treatment", "People screened diabetes"],
-  ["% TB Patients Notified", "Total TB Patients Notified", "Estimated TB patient"],
-  ["% TB Cases Successfully Treated", "Total TB Cases Successfully Treated", "Total TB Patients Notified"],
-  ["% TB patients assessed for differentiated care", "Total TB patients assessed for differentiated care", "Total TB Patients Notified"]
-];
+// "(A-B)" -> difference of two columns; "(A/30)" -> a column divided by a
+// constant; anything else -> a plain column reference.
+function parseRatioExpr(text){
+  text = text.trim();
+  if(text.startsWith("(") && text.endsWith(")")){
+    const inner = text.slice(1,-1).trim();
+    if(inner.includes("/")){
+      const parts = inner.split("/");
+      return { kind:"divConst", col: parts[0].trim(), div: parseFloat(parts[1]) };
+    }
+    const idx = inner.lastIndexOf("-");
+    if(idx>-1) return { kind:"diff", colA: inner.slice(0,idx).trim(), colB: inner.slice(idx+1).trim() };
+    return { kind:"col", col: inner };
+  }
+  return { kind:"col", col:text };
+}
+function resolveRatioExpr(spec){
+  if(spec.kind==="col"){ const c=matchColumn(spec.col); return c?{kind:"col",col:c}:null; }
+  if(spec.kind==="diff"){ const a=matchColumn(spec.colA), b=matchColumn(spec.colB); return (a&&b)?{kind:"diff",colA:a,colB:b}:null; }
+  if(spec.kind==="divConst"){ const c=matchColumn(spec.col); return c?{kind:"divConst",col:c,div:spec.div}:null; }
+  return null;
+}
+// Resolves an expr against a set of rows (1 row for a single month, many rows
+// for a combined period). Denominator/numerator columns flagged in
+// LAST_MONTH_COLS use the most recent row's value instead of a sum.
+function evalRatioExpr(rows, spec, latestRow){
+  if(spec.kind==="col"){
+    if(state.lastMonthCols.has(spec.col)) return latestRow ? parseNum(latestRow[spec.col]) : null;
+    let s=0, any=false;
+    rows.forEach(r=>{ const v=parseNum(r[spec.col]); if(v!==null){ s+=v; any=true; } });
+    return any ? s : null;
+  }
+  if(spec.kind==="diff"){
+    let sa=0, sb=0, any=false;
+    rows.forEach(r=>{
+      const a=parseNum(r[spec.colA]), b=parseNum(r[spec.colB]);
+      if(a!==null && b!==null){ sa+=a; sb+=b; any=true; }
+    });
+    return any ? (sa-sb) : null;
+  }
+  if(spec.kind==="divConst"){
+    let s=0, cnt=0;
+    rows.forEach(r=>{ const v=parseNum(r[spec.col]); if(v!==null){ s+=v; cnt++; } });
+    return cnt ? (s/(spec.div*cnt)) : null;
+  }
+  return null;
+}
+function computeRatio(rows, def, latestRow){
+  const num = evalRatioExpr(rows, def.numSpec, latestRow);
+  const den = evalRatioExpr(rows, def.denSpec, latestRow);
+  if(num===null || den===null || den===0) return null;
+  return num * def.multiplier / den;
+}
 
 const GROUPS = [
   { name:"ANC Services", items:["Target ANC","ANC Rep","% ANC Rep.","ANC LL","%ANC LL/Rep.","ANC 12 Rep","% ANC 12 rep.","ANC 12 LL","% ANC 12 LL/rep","4 ANC rep","% 4 ANC rep","4 ANC LL","% 4 ANC LL/Rep","HRP","% HRP"] },
@@ -471,8 +536,7 @@ const state = {
   maxAggCols: new Set(),
   averageAlwaysCols: new Set(),
   lastMonthCols: new Set(),
-  ratioMap: new Map(),   // percent-col -> {numCol, denCol} for true period recomputation
-  rateMap: new Map(),    // rate-col (e.g. SBR) -> {numCol, denCol, multiplier} for true period recomputation
+  ratioDefs: new Map(),  // resolved indicator-col -> {numSpec, denSpec, multiplier, isPercentFormat}
   currentTab: "overview",
   indicatorMode: "matrix",
   loaded: false,
@@ -495,6 +559,7 @@ function parseNum(v){
 }
 function isPercentCol(colName){
   if(state.forceNonPercentCols.has(colName)) return false;
+  if(state.ratioDefs.has(colName)) return state.ratioDefs.get(colName).isPercentFormat;
   return colName.indexOf("%") !== -1;
 }
 
@@ -588,15 +653,14 @@ function resolveSpecialCols(){
   state.maxAggCols = new Set(MAX_AGG_COLS.map(matchColumn).filter(Boolean));
   state.averageAlwaysCols = new Set(AVERAGE_ALWAYS_COLS.map(matchColumn).filter(Boolean));
   state.lastMonthCols = new Set(LAST_MONTH_COLS.map(matchColumn).filter(Boolean));
-  state.ratioMap = new Map();
-  PERCENT_RATIO_DEFS.forEach(([pctLabel, numLabel, denLabel])=>{
-    const pctCol = matchColumn(pctLabel), numCol = matchColumn(numLabel), denCol = matchColumn(denLabel);
-    if(pctCol && numCol && denCol) state.ratioMap.set(pctCol, { numCol, denCol });
-  });
-  state.rateMap = new Map();
-  RATE_DEFS.forEach(([outLabel, numLabel, denLabel, multiplier])=>{
-    const outCol = matchColumn(outLabel), numCol = matchColumn(numLabel), denCol = matchColumn(denLabel);
-    if(outCol && numCol && denCol) state.rateMap.set(outCol, { numCol, denCol, multiplier });
+  state.ratioDefs = new Map();
+  RATIO_DEFS.forEach(([label, numText, denText, multiplier, isPct])=>{
+    const outCol = matchColumn(label);
+    if(!outCol) return;
+    const numSpec = resolveRatioExpr(parseRatioExpr(numText));
+    const denSpec = resolveRatioExpr(parseRatioExpr(denText));
+    if(!numSpec || !denSpec) return;
+    state.ratioDefs.set(outCol, { numSpec, denSpec, multiplier, isPercentFormat: isPct });
   });
 }
 function resolveGroupCols(){
@@ -769,89 +833,54 @@ function getFilteredRows(){
 /* Aggregate a set of rows by facility for a list of column names.
    Percent columns -> mean across matched rows; other numeric columns -> sum. */
 // Aggregation rule per column, in priority order:
-//  1. AVERAGE_ALWAYS_COLS (e.g. Total Score) -> mean, regardless of "%" in name
-//  2. percent columns (isPercentCol, honouring FORCE_NON_PERCENT) -> mean
-//  3. LAST_MONTH_COLS (No. of Doctors / No. of CHOs / No of SHC) -> value from the
-//     most recent selected month only (never summed — these are staffing/infra counts)
-//  4. MAX_AGG_COLS (Population, Drugs available, No of investigation available) -> max
-//  5. everything else -> sum
-// True combined percentage over a set of rows (e.g. several months for one
-// facility): sum of numerator ÷ sum of denominator — NOT an average of the
-// monthly % figures. Skips a row if either side is missing for that month.
-function computeActualPercent(rows, numCol, denCol){
-  let sumNum = 0, sumDen = 0, any = false;
-  rows.forEach(r=>{
-    const nv = parseNum(r[numCol]), dv = parseNum(r[denCol]);
-    if(nv===null || dv===null || dv<=0) return;
-    sumNum += nv; sumDen += dv; any = true;
-  });
-  return any && sumDen>0 ? (sumNum/sumDen*100) : null;
-}
-// Same idea as computeActualPercent but for non-percentage rates (e.g. SBR =
-// SB × 1000 ÷ ID-Facility) that use a different multiplier than 100.
-function computeActualRate(rows, numCol, denCol, multiplier){
-  let sumNum = 0, sumDen = 0, any = false;
-  rows.forEach(r=>{
-    const nv = parseNum(r[numCol]), dv = parseNum(r[denCol]);
-    if(nv===null || dv===null || dv<=0) return;
-    sumNum += nv; sumDen += dv; any = true;
-  });
-  return any && sumDen>0 ? (sumNum/sumDen*multiplier) : null;
-}
-
+//  1. state.ratioDefs (Formula.docx numerator/denominator) -> recomputed from
+//     summed (or latest-month, per LAST_MONTH_COLS) numerator/denominator —
+//     never a plain average of each month's own % figure.
+//  2. LAST_MONTH_COLS (staffing/status counts) -> value from the most recent
+//     selected month only (never summed).
+//  3. AVERAGE_ALWAYS_COLS (e.g. Total Score) -> mean.
+//  4. any remaining "%"-named column with no formula on file -> mean (best
+//     available fallback; there is no safe numerator/denominator to recompute from).
+//  5. MAX_AGG_COLS (Population, Drugs available, No of investigation available) -> max.
+//  6. everything else -> sum.
 function aggregateByFacility(rows, colNames){
-  const map = new Map();
-  // Any column referenced as a numerator/denominator by rateMap (e.g. SB,
-  // ID-Facility for SBR) must be summed even if the caller didn't ask for it
-  // directly, so the rate can be recomputed correctly below.
-  const extraSumCols = new Set();
-  state.rateMap.forEach(({numCol, denCol})=>{ extraSumCols.add(numCol); extraSumCols.add(denCol); });
-
+  const groups = new Map(); // facilityKey -> {block, facility, type, rows:[]}
   rows.forEach(r=>{
     const key = facilityKey(r);
-    if(!map.has(key)){
-      map.set(key, {
-        block: r[state.idCols.block], facility: r[state.idCols.sector], type: r[state.idCols.type],
-        sums:{}, counts:{}, maxes:{}, monthCount:0, latestTimeKey:-Infinity, latestRow:null
-      });
+    if(!groups.has(key)){
+      groups.set(key, { block:r[state.idCols.block], facility:r[state.idCols.sector], type:r[state.idCols.type], rows:[] });
     }
-    const e = map.get(key);
-    e.monthCount++;
-    const tk = rowTimeKey(r);
-    if(tk >= e.latestTimeKey){ e.latestTimeKey = tk; e.latestRow = r; }
-    colNames.forEach(c=>{
-      const v = parseNum(r[c]);
-      if(v===null) return;
-      e.sums[c] = (e.sums[c]||0) + v;
-      e.counts[c] = (e.counts[c]||0) + 1;
-      e.maxes[c] = (e.maxes[c]===undefined) ? v : Math.max(e.maxes[c], v);
-    });
-    extraSumCols.forEach(c=>{
-      if(colNames.includes(c)) return; // already summed above
-      const v = parseNum(r[c]);
-      if(v===null) return;
-      e.sums[c] = (e.sums[c]||0) + v;
-    });
+    groups.get(key).rows.push(r);
   });
-  return Array.from(map.values()).map(e=>{
+  return Array.from(groups.values()).map(g=>{
+    const facRows = g.rows;
+    let latestRow = null, latestKey = -Infinity;
+    facRows.forEach(r=>{ const tk = rowTimeKey(r); if(tk >= latestKey){ latestKey = tk; latestRow = r; } });
+
     const vals = {};
     colNames.forEach(c=>{
-      if(state.rateMap.has(c)){
-        const {numCol, denCol, multiplier} = state.rateMap.get(c);
-        vals[c] = e.sums[denCol] ? ((e.sums[numCol]||0) * multiplier / e.sums[denCol]) : null;
+      if(state.ratioDefs.has(c)){
+        vals[c] = computeRatio(facRows, state.ratioDefs.get(c), latestRow);
         return;
       }
       if(state.lastMonthCols.has(c)){
-        vals[c] = e.latestRow ? parseNum(e.latestRow[c]) : null;
+        vals[c] = latestRow ? parseNum(latestRow[c]) : null;
         return;
       }
-      if(!e.counts[c]){ vals[c] = null; return; }
-      if(state.averageAlwaysCols.has(c)) vals[c] = e.sums[c]/e.counts[c];
-      else if(isPercentCol(c)) vals[c] = e.sums[c]/e.counts[c];
-      else if(state.maxAggCols.has(c)) vals[c] = e.maxes[c];
-      else vals[c] = e.sums[c];
+      let sum=0, count=0, max;
+      facRows.forEach(r=>{
+        const v = parseNum(r[c]);
+        if(v===null) return;
+        sum += v; count++;
+        max = (max===undefined) ? v : Math.max(max, v);
+      });
+      if(!count){ vals[c] = null; return; }
+      if(state.averageAlwaysCols.has(c)) vals[c] = sum/count;
+      else if(isPercentCol(c)) vals[c] = sum/count;
+      else if(state.maxAggCols.has(c)) vals[c] = max;
+      else vals[c] = sum;
     });
-    return { block:e.block, facility:e.facility, type:e.type, monthCount:e.monthCount, vals };
+    return { block:g.block, facility:g.facility, type:g.type, monthCount:facRows.length, vals };
   });
 }
 
@@ -1170,22 +1199,20 @@ function renderFacilityPage(){
     html += '<th>कुल/असली %/नवीनतम/अधिकतम</th></tr></thead><tbody>';
     g.cols.forEach(c=>{
       html += '<tr><td class="sticky-col">'+esc(c.label)+'</td>';
-      const rm8 = state.rateMap.get(c.col);
-      const vals = rm8
-        ? rows.map(r=>{ const nv=parseNum(r[rm8.numCol]), dv=parseNum(r[rm8.denCol]); return (nv!==null && dv) ? (nv*rm8.multiplier/dv) : null; })
+      const def = state.ratioDefs.get(c.col);
+      const vals = def
+        ? rows.map(r=> computeRatio([r], def, r))
         : rows.map(r=>parseNum(r[c.col]));
       vals.forEach(v=>{ html += '<td class="num tabular">'+fmtVal(c.col, v)+'</td>'; });
       const nonNull = vals.filter(v=>v!==null);
       let cum = null;
-      if(rm8){
-        // दर इंडिकेटर (जैसे SBR) — सभी चयनित माह के अंश-योग व हर-योग से पुनर्गणना
-        cum = computeActualRate(rows, rm8.numCol, rm8.denCol, rm8.multiplier);
-      } else if(state.ratioMap.has(c.col)){
-        // % इंडिकेटर — असली संयुक्त प्रतिशत = सभी चयनित माह के अंश-योग ÷ हर-योग (औसत नहीं)
-        const rm = state.ratioMap.get(c.col);
-        cum = computeActualPercent(rows, rm.numCol, rm.denCol);
+      if(def){
+        // सूत्र-आधारित इंडिकेटर (Formula.docx) — सभी चयनित माह के अंश-योग व हर-योग (या नवीनतम, staffing कॉलम हेतु) से पुनर्गणना — औसत नहीं
+        let latestRow = null, latestKey = -Infinity;
+        rows.forEach(r=>{ const tk = rowTimeKey(r); if(tk >= latestKey){ latestKey = tk; latestRow = r; } });
+        cum = computeRatio(rows, def, latestRow);
       } else if(nonNull.length){
-        // जिन % इंडिकेटर का अंश/हर स्पष्ट नहीं, उनके लिए नवीनतम माह का actual मान
+        // जिन इंडिकेटर का सूत्र फ़ाइल में नहीं है, उनके लिए नवीनतम माह का actual मान (% के लिए) या योग/अधिकतम
         if(isPercentCol(c.col) || state.lastMonthCols.has(c.col)) cum = nonNull[nonNull.length-1];
         else if(state.averageAlwaysCols.has(c.col)) cum = nonNull.reduce((a,b)=>a+b,0)/nonNull.length;
         else if(state.maxAggCols.has(c.col)) cum = Math.max(...nonNull);
@@ -1225,17 +1252,16 @@ function printFacilityFlat(){
   body += '<th>कुल/असली %/नवीनतम/अधिकतम</th></tr></thead><tbody>';
   state.groupCols.forEach(g=>{
     g.cols.forEach(c=>{
-      const rm8 = state.rateMap.get(c.col);
-      const vals = rm8
-        ? rows.map(r=>{ const nv=parseNum(r[rm8.numCol]), dv=parseNum(r[rm8.denCol]); return (nv!==null && dv) ? (nv*rm8.multiplier/dv) : null; })
+      const def = state.ratioDefs.get(c.col);
+      const vals = def
+        ? rows.map(r=> computeRatio([r], def, r))
         : rows.map(r=>parseNum(r[c.col]));
       const nonNull = vals.filter(v=>v!==null);
       let cum = null;
-      if(rm8){
-        cum = computeActualRate(rows, rm8.numCol, rm8.denCol, rm8.multiplier);
-      } else if(state.ratioMap.has(c.col)){
-        const rm = state.ratioMap.get(c.col);
-        cum = computeActualPercent(rows, rm.numCol, rm.denCol);
+      if(def){
+        let latestRow = null, latestKey = -Infinity;
+        rows.forEach(r=>{ const tk = rowTimeKey(r); if(tk >= latestKey){ latestKey = tk; latestRow = r; } });
+        cum = computeRatio(rows, def, latestRow);
       } else if(nonNull.length){
         if(isPercentCol(c.col) || state.lastMonthCols.has(c.col)) cum = nonNull[nonNull.length-1];
         else if(state.averageAlwaysCols.has(c.col)) cum = nonNull.reduce((a,b)=>a+b,0)/nonNull.length;
