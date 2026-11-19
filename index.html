@@ -164,6 +164,8 @@ thead th:hover{color:var(--primary);}
 thead th .arrow{font-size:10px;color:var(--accent);margin-inline-start:4px;}
 tbody td{padding:8px 10px;border-bottom:1px solid var(--border-soft);white-space:nowrap;}
 tbody tr:hover td{background:var(--surface-2);}
+tfoot td{font-weight:800;background:var(--primary-soft);border-top:2px solid var(--primary);position:sticky;bottom:0;z-index:3;}
+tfoot td.sticky-col{left:0;z-index:6;}
 tbody tr:nth-child(1) td.rank, tbody tr:nth-child(2) td.rank, tbody tr:nth-child(3) td.rank{font-weight:800;}
 td.rank{color:var(--muted);font-family:'Manrope';width:28px;}
 .badge-type{
@@ -374,13 +376,17 @@ const FILTER_KEYS = ["district","block","year","month","ftype"];
 // Columns whose name contains "%" but are NOT actually a percentage (so they must
 // never be averaged/formatted as %) — e.g. "S -form reported by SCs =>90%" is a
 // count of sub-centres, the ">90%" is just part of the indicator's name.
-const FORCE_NON_PERCENT = ["S -form reported by SCs =>90%"];
+const FORCE_NON_PERCENT = ["S -form reported by SCs =>90%","P form reported >90%"];
 
 // Columns that should never be summed across multiple selected months — instead
 // the HIGHEST value across the selected months is shown (Population is a static,
 // one-time figure; Drugs/Investigation availability is a status, not a monthly
 // cumulative count).
-const MAX_AGG_COLS = ["Population","Drugs available","No of investigation available"];
+const MAX_AGG_COLS = ["Population","Drugs available","No of investigation available",
+  // इन इंडिकेटर को कई माह चुनने पर जोड़ा (cumulative) नहीं जाता — अधिकतम मान (maximum) दिखाया जाता है
+  "No. of CHOs","No of SHC","No. of SC",
+  "Total CHOs initiated screening for Expanded Services.","No of SHCs having >45 drugs","No of SHCs providing Diagnostic >7","No of CHOs using CHO soft",
+  "S -form reported by SCs =>90%","P form reported >90%","L Form reported days","Total ASHA","Total ELA (population >30+yrs)"];
 
 // Columns that must always be averaged across months, never summed — even though
 // their name has no "%" (Total Score is already a 0–100 score).
@@ -391,7 +397,7 @@ const AVERAGE_ALWAYS_COLS = [TOTAL_SCORE_FIELD];
 // NOT be summed; show the figure reported in the most recent selected month
 // instead. (Stock-out/Expiry are coded flags — N=1/Y=2 — so summing them across
 // months is meaningless; the latest month's flag is the only sensible figure.)
-const LAST_MONTH_COLS = ["No. of Doctors","No. of CHOs","No of SHC","Stock out N=1,Y=2","Expiry N=1 Y=2"];
+const LAST_MONTH_COLS = ["No. of Doctors","Stock out N=1,Y=2","Expiry N=1 Y=2"];
 
 // =========================================================================
 // NUMERATOR / DENOMINATOR FORMULAS — from Formula.docx (authoritative).
@@ -484,6 +490,9 @@ function resolveRatioExpr(spec){
 function evalRatioExpr(rows, spec, latestRow){
   if(spec.kind==="col"){
     if(state.lastMonthCols.has(spec.col)) return latestRow ? parseNum(latestRow[spec.col]) : null;
+    if(state.maxAggCols.has(spec.col)){
+      let m=null; rows.forEach(r=>{ const v=parseNum(r[spec.col]); if(v!==null && (m===null||v>m)) m=v; }); return m;
+    }
     let s=0, any=false;
     rows.forEach(r=>{ const v=parseNum(r[spec.col]); if(v!==null){ s+=v; any=true; } });
     return any ? s : null;
@@ -515,7 +524,7 @@ const GROUPS = [
   { name:"Delivery Services", items:["ELA Del","ID-Facility","Del LL","% ID LL/ELA","SB","SBR","Mis.Del.","% Mis.Del./ELA","5PNC","% 5 PNC","JSY","% JSY","Girl Child","RSY 1st","% RSY 1st"] },
   { name:"Immunization Services", items:["ELA FI","FI rep.","% FI Rep/ELA","FI LL","% FI LL/Rep.","Hip 0","% hip 0 Dose","BCG","Pent 1","Pent3","MR 1","MR 2","Missing FI","P1 to P3","M1 to M2","% Missing FI","DO P1 to P3","DO M1 to M2","Total immunisation Sessioned planned","Total Session held","% Sessions held","Total vaccination done","Avg. vaccination"] },
   { name:"Family Planning Services", items:["ID-Facility","ELA Str","Str","% Str.","PPIUCD","% PPIUCD","ELA Antra","ANTRA 1st","% Antra","Stock out N=1,Y=2","Expiry N=1 Y=2"] },
-  { name:"Clinical Services", items:["No. of Doctors","No. of CHOs","No of SHC","Population","Monthly OPD","daily OPD/doctor","Total Blood Slides Collected","% Blood slides collected","Drugs available","No of investigation available","Total IPD","TID booked under MAA","% TID booked/IPD","S -form reported by SCs =>90%","% SC reporting >90%","P form reported >90%","L Form reported days","Total ASHA","Total Incentive dispersed","Average incentive disperesed","OPD Pharmacy","% OPD"] },
+  { name:"Clinical Services", items:["No. of Doctors","No. of CHOs","No of SHC","No. of SC","Population","Monthly OPD","daily OPD/doctor","Total Blood Slides Collected","% Blood slides collected","Drugs available","No of investigation available","Total IPD","TID booked under MAA","% TID booked/IPD","S -form reported by SCs =>90%","% SC reporting >90%","P form reported >90%","L Form reported days","Total ASHA","Total Incentive dispersed","Average incentive disperesed","OPD Pharmacy","% OPD"] },
   { name:"AAM", items:["No. of CHOs","No of SHC","Total CHOs initiated screening for Expanded Services.","% Total CHOs initiated screening for Expanded Services.","No of SHCs having >45 drugs","% SHC having >45","No of SHCs providing Diagnostic >7","% SHC providing Investigation >7","No of CHOs using CHO soft","% CHOs using CHO Soft"] },
   { name:"NCD", items:["Total ELA (population >30+yrs)","people screened HT","% people screened HT","HT - receiving treatment","% receiving treatment","People screened diabetes","% People screened diabetes","Diabetes receiving treatment","%Diabetes receiving treatment"] },
   { name:"TB", items:["Estimated TB patient","Total TB Patients Notified","% TB Patients Notified","Total TB Cases Successfully Treated","% TB Cases Successfully Treated","Total TB patients assessed for differentiated care","% TB patients assessed for differentiated care"] }
@@ -876,11 +885,11 @@ function aggregateByFacility(rows, colNames){
       });
       if(!count){ vals[c] = null; return; }
       if(state.averageAlwaysCols.has(c)) vals[c] = sum/count;
-      else if(isPercentCol(c)) vals[c] = sum/count;
       else if(state.maxAggCols.has(c)) vals[c] = max;
+      else if(isPercentCol(c)) vals[c] = sum/count;
       else vals[c] = sum;
     });
-    return { block:g.block, facility:g.facility, type:g.type, monthCount:facRows.length, vals };
+    return { block:g.block, facility:g.facility, type:g.type, monthCount:facRows.length, vals, rows:facRows, latestRow };
   });
 }
 
@@ -1017,6 +1026,29 @@ function renderGroupMatrix(group, rows){
   window.__matrixSort = window.__matrixSort || { key:"facility", dir:"asc" };
   renderMatrixTable();
 }
+
+/* ---- कुल (Total) पंक्ति: चयनित सभी फैसिलिटीज़ के लिए, हर इंडिकेटर का ----
+   • सूत्र वाले % इंडिकेटर  -> सभी फैसिलिटी के अंश-योग ÷ हर-योग (औसत नहीं)
+   • गिनती/संख्या वाले       -> हर फैसिलिटी के (अधिकतम/योग नियम से निकले) मान का योग
+   • Total Score / बिना सूत्र के %  -> फैसिलिटीज़ का औसत
+   • Stock out / Expiry फ्लैग (N=1,Y=2) -> योग का अर्थ नहीं, इसलिए "—" */
+const NO_TOTAL_COLS = ["Stock out N=1,Y=2","Expiry N=1 Y=2"];
+function totalForColumn(agg, col){
+  if(NO_TOTAL_COLS.map(matchColumn).includes(col)) return null;
+  const def = state.ratioDefs.get(col);
+  if(def){
+    let n=0, d=0, any=false;
+    agg.forEach(a=>{
+      const nv = evalRatioExpr(a.rows, def.numSpec, a.latestRow), dv = evalRatioExpr(a.rows, def.denSpec, a.latestRow);
+      if(nv!==null && dv!==null){ n+=nv; d+=dv; any=true; }
+    });
+    return (any && d!==0) ? n*def.multiplier/d : null;
+  }
+  const vs = agg.map(a=>a.vals[col]).filter(v=>v!==null && v!==undefined && !isNaN(v));
+  if(!vs.length) return null;
+  if(state.averageAlwaysCols.has(col) || isPercentCol(col)) return vs.reduce((x,y)=>x+y,0)/vs.length;
+  return vs.reduce((x,y)=>x+y,0);
+}
 function renderMatrixTable(){
   const { agg, cols } = window.__matrixData;
   const sortKey = window.__matrixSort.key, sortDir = window.__matrixSort.dir;
@@ -1049,7 +1081,9 @@ function renderMatrixTable(){
     });
     html += '</tr>';
   });
-  html += '</tbody></table></div>';
+  html += '</tbody><tfoot><tr class="total-row"><td class="sticky-col">कुल / Total</td><td>'+agg.length+' फैसिलिटीज़</td>';
+  cols.forEach(c=>{ html += '<td class="num tabular">'+fmtVal(c.col, totalForColumn(agg, c.col))+'</td>'; });
+  html += '</tr></tfoot></table></div>';
   document.getElementById("indicatorContent").innerHTML = html;
 }
 // Colour a cell along a red -> yellow -> green scale by where its value falls
@@ -1098,7 +1132,7 @@ function renderTopBottom(group, rows){
   const bottom = better==="desc" ? sortedDesc.slice().reverse().slice(0,15) : sortedDesc.slice(0,15);
   const maxV = Math.max(...agg.map(a=>Math.abs(a.vals[col])), 1);
 
-  let html = '<div class="section-title">'+esc(label)+' <span class="tag">'+agg.length+' फैसिलिटीज़</span></div>';
+  let html = '<div class="section-title">'+esc(label)+' <span class="tag">'+agg.length+' फैसिलिटीज़</span> <span class="tag">कुल / Total: '+fmtVal(col, totalForColumn(agg, col))+'</span></div>';
   html += '<div class="grid-2">';
   html += '<div><div class="section-title" style="margin-top:0;">टॉप 15</div>' + indicatorMiniTable(top, col, maxV, "top") + '</div>';
   html += '<div><div class="section-title" style="margin-top:0;">बॉटम 15</div>' + indicatorMiniTable(bottom, col, maxV, "bottom") + '</div>';
@@ -1213,9 +1247,9 @@ function renderFacilityPage(){
         cum = computeRatio(rows, def, latestRow);
       } else if(nonNull.length){
         // जिन इंडिकेटर का सूत्र फ़ाइल में नहीं है, उनके लिए नवीनतम माह का actual मान (% के लिए) या योग/अधिकतम
-        if(isPercentCol(c.col) || state.lastMonthCols.has(c.col)) cum = nonNull[nonNull.length-1];
+        if(state.maxAggCols.has(c.col)) cum = Math.max(...nonNull);
+        else if(isPercentCol(c.col) || state.lastMonthCols.has(c.col)) cum = nonNull[nonNull.length-1];
         else if(state.averageAlwaysCols.has(c.col)) cum = nonNull.reduce((a,b)=>a+b,0)/nonNull.length;
-        else if(state.maxAggCols.has(c.col)) cum = Math.max(...nonNull);
         else cum = nonNull.reduce((a,b)=>a+b,0);
       }
       html += '<td class="num tabular" style="font-weight:700;">'+fmtVal(c.col, cum)+'</td>';
@@ -1263,9 +1297,9 @@ function printFacilityFlat(){
         rows.forEach(r=>{ const tk = rowTimeKey(r); if(tk >= latestKey){ latestKey = tk; latestRow = r; } });
         cum = computeRatio(rows, def, latestRow);
       } else if(nonNull.length){
-        if(isPercentCol(c.col) || state.lastMonthCols.has(c.col)) cum = nonNull[nonNull.length-1];
+        if(state.maxAggCols.has(c.col)) cum = Math.max(...nonNull);
+        else if(isPercentCol(c.col) || state.lastMonthCols.has(c.col)) cum = nonNull[nonNull.length-1];
         else if(state.averageAlwaysCols.has(c.col)) cum = nonNull.reduce((a,b)=>a+b,0)/nonNull.length;
-        else if(state.maxAggCols.has(c.col)) cum = Math.max(...nonNull);
         else cum = nonNull.reduce((a,b)=>a+b,0);
       }
       body += '<tr><td>'+esc(g.name)+'</td><td>'+esc(c.label)+'</td>';
